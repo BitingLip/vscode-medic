@@ -253,6 +253,14 @@
                 } else {
                     $errorFeed.appendChild(card);
                 }
+                // Detect real overflow after DOM insertion
+                requestAnimationFrame(() => {
+                    const content = card.querySelector('.error-code-content');
+                    const box = card.querySelector('.error-code-box');
+                    if (content && box && content.scrollHeight > content.clientHeight) {
+                        box.classList.add('overflows');
+                    }
+                });
                 prevNode = card;
             }
         }
@@ -306,9 +314,8 @@
 
         const checkboxChecked = isChipSelected ? ' checked' : '';
 
-        // Count lines to determine if we need unfold
-        const msgLines = err.message.split('\n').length;
-        const hasOverflow = msgLines > 6;
+        // We'll detect overflow after render via DOM measurement
+        const hasOverflow = err.message.split('\n').length > 6;
 
         el.innerHTML = `
             <div class="error-header">
@@ -907,7 +914,8 @@
                     type: 'sendError', id,
                     guidingPrompt: $promptInput?.value?.trim() || '',
                     mode: selectedMode || undefined,
-                    model: selectedModel || undefined
+                    model: selectedModel || undefined,
+                    newSession: settings.sessionMode !== 'active'
                 });
                 break;
             case 'resolve':

@@ -4,6 +4,10 @@
 
 MEDIC watches your running application's log files and terminal output for runtime errors, displays them in a real-time dashboard, and sends them straight to GitHub Copilot Chat with full context — so the AI agent can diagnose and fix issues as they happen.
 
+| Error detected in MEDIC dashboard | Copilot diagnosing and fixing the error |
+|---|---|
+| ![MEDIC dashboard showing a captured runtime error](resources/screenshot_01.png) | ![GitHub Copilot Chat resolving the error](resources/screenshot_02.png) |
+
 ---
 
 ## Why MEDIC?

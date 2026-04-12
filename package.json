@@ -1,7 +1,7 @@
 {
     "name": "vscode-medic",
     "displayName": "MEDIC",
-    "description": "Watches your running app for runtime errors and automatically dispatches them to GitHub Copilot for diagnosis and fixing — like a medic for your codebase.",
+    "description": "Watches for runtime errors and automatically resolves them with Copilot.",
     "version": "0.1.0",
     "publisher": "bitinglip",
     "license": "MIT",
@@ -24,17 +24,21 @@
     "categories": [
         "Programming Languages",
         "Debuggers",
+        "Testing",
+        "Machine Learning",
         "Other"
     ],
     "keywords": [
         "copilot",
-        "errors",
-        "debugging",
+        "error",
+        "debug",
         "runtime",
-        "error-handling",
+        "log",
+        "watcher",
+        "diagnostics",
         "ai",
-        "log-watcher",
-        "diagnostics"
+        "autofix",
+        "monitoring"
     ],
     "activationEvents": [
         "onStartupFinished"
