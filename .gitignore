@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.vsix
+*.bak
+.vscode-test/
+SPEC.md
+resources/icon-marketplace.svg
+resources/repository-open-graph-template.svg

@@ -1,0 +1,16 @@
+.vscode/**
+.vscode-test/**
+src/**
+node_modules/**
+!node_modules/@vscode/codicons/dist/**
+.gitignore
+tsconfig.json
+esbuild.js
+**/*.map
+!dist/**
+SPEC.md
+*.vsix
+resources/icon-marketplace.svg
+media/*.bak
+!media/**
+!resources/**
