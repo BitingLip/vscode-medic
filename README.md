@@ -10,7 +10,7 @@ MEDIC watches your running application's log files and terminal output for runti
 
 ---
 
-## Why MEDIC?
+## What is MEDIC?
 
 When you're running a full-stack app, errors can appear anywhere — buried in log files, scrolling past in terminals, or hidden across multiple services. Manually copying errors into Copilot Chat is tedious and slow.
 
