@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { WatcherConfig, ErrorEntry } from './types';
+import { execSync } from 'child_process';
+import { WatcherConfig, ErrorEntry, DEFAULT_ERROR_PATTERNS, DEFAULT_WARNING_PATTERNS } from './types';
 import { ErrorQueue } from './ErrorQueue';
 
 export class WatcherManager implements vscode.Disposable {
@@ -12,13 +13,30 @@ export class WatcherManager implements vscode.Disposable {
     private terminalDisposable: vscode.Disposable | undefined;
     private pollTimer: ReturnType<typeof setInterval> | undefined;
     private configs: WatcherConfig[] = [];
-    private multiLineBuffer = new Map<string, { lines: string[]; timer: NodeJS.Timeout }>();
+    private multiLineBuffer = new Map<string, { lines: string[]; timer: NodeJS.Timeout; error?: ErrorEntry }>();
     private readonly output = vscode.window.createOutputChannel('MEDIC');
 
     /** Strip ANSI escape sequences (color codes, cursor movement, etc.) */
     private static stripAnsi(str: string): string {
         // eslint-disable-next-line no-control-regex
         return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+    }
+
+    /** Extract a timestamp from a log line. Returns epoch ms, or Date.now() if none found. */
+    private static extractTimestamp(line: string): number {
+        // ISO 8601: 2026-04-13T10:00:01.123Z or 2026-04-13T10:00:01+00:00
+        const isoMatch = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/.exec(line);
+        if (isoMatch) {
+            const parsed = Date.parse(isoMatch[0]);
+            if (!isNaN(parsed)) { return parsed; }
+        }
+        // Common log format: 2026-04-13 10:00:01 or 2026/04/13 10:00:01
+        const commonMatch = /(\d{4}[-/]\d{2}[-/]\d{2})\s+(\d{2}:\d{2}:\d{2})/.exec(line);
+        if (commonMatch) {
+            const parsed = Date.parse(`${commonMatch[1].replace(/\//g, '-')}T${commonMatch[2]}Z`);
+            if (!isNaN(parsed)) { return parsed; }
+        }
+        return Date.now();
     }
 
     /** Detect file encoding from first bytes: UTF-16LE BOM or null-byte interleaving */
@@ -57,11 +75,369 @@ export class WatcherManager implements vscode.Disposable {
         private readonly errorQueue: ErrorQueue,
     ) {
         this.configs = context.globalState.get<WatcherConfig[]>('watcherConfigs', []);
+        this.migratePatterns();
         this.startAll();
+    }
+
+    /** Auto-add any new default patterns to existing watchers that are missing them. */
+    private migratePatterns(): void {
+        let changed = false;
+        for (const c of this.configs) {
+            for (const p of DEFAULT_ERROR_PATTERNS) {
+                if (!c.errorPatterns.includes(p)) {
+                    c.errorPatterns.push(p);
+                    changed = true;
+                }
+            }
+            for (const p of DEFAULT_WARNING_PATTERNS) {
+                if (!c.warningPatterns.includes(p)) {
+                    c.warningPatterns.push(p);
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            this.output.appendLine('[Migration] Added new default patterns to existing watchers');
+            this.saveConfigs();
+        }
     }
 
     getConfigs(): WatcherConfig[] {
         return [...this.configs];
+    }
+
+    /**
+     * Discovery-only refresh. Does NOT read file content or scan for errors.
+     * - Scans common log directories (logs/, log/, root) for *.log files.
+     * - Discovers currently open VS Code terminals.
+     * - Removes auto-discovered file watchers whose files no longer exist.
+     * - Never removes manual, archived, or pinned (protectedIds) watchers.
+     * Returns the number of watchers added/removed for UI feedback.
+     */
+    async discoverAll(protectedIds?: Set<string>): Promise<{ added: number; removed: number }> {
+        const existingPaths = new Set(this.configs.map(c => c.path));
+        let added = 0;
+        let removed = 0;
+
+        // 1. Scan for *.log files in common directories
+        const workRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (workRoot) {
+            const logDirs = ['logs', 'log'].map(d => path.join(workRoot, d));
+            // Also check workspace root for stray .log files
+            logDirs.push(workRoot);
+
+            for (const dir of logDirs) {
+                if (!fs.existsSync(dir)) { continue; }
+                let files: string[];
+                try { files = fs.readdirSync(dir).filter(f => f.endsWith('.log')); }
+                catch { continue; }
+
+                for (const file of files) {
+                    const relPath = path.relative(workRoot, path.join(dir, file)).replace(/\\/g, '/');
+                    if (existingPaths.has(relPath)) { continue; }
+                    const name = file.replace(/\.log$/, '')
+                        .split(/[-_]/)
+                        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                        .join(' ');
+                    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+                    this.configs.push({
+                        id, name, type: 'file', path: relPath,
+                        errorPatterns: [...DEFAULT_ERROR_PATTERNS],
+                        warningPatterns: [...DEFAULT_WARNING_PATTERNS],
+                        enabled: false,
+                    });
+                    existingPaths.add(relPath);
+                    added++;
+                }
+            }
+        }
+
+        // 2. Discover currently open VS Code terminals
+        for (const terminal of vscode.window.terminals) {
+            const termPath = `terminal://${terminal.name}`;
+            if (existingPaths.has(termPath)) { continue; }
+            const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+            this.configs.push({
+                id, name: terminal.name, type: 'terminal', path: termPath,
+                errorPatterns: [...DEFAULT_ERROR_PATTERNS],
+                warningPatterns: [...DEFAULT_WARNING_PATTERNS],
+                enabled: false,
+            });
+            existingPaths.add(termPath);
+            added++;
+        }
+
+        // 3. Discover running OS processes that reference the workspace
+        const processAdded = await this.discoverOsProcesses(protectedIds);
+        added += processAdded;
+
+        // 4. Deduplicate: remove file watchers whose path is claimed by a process watcher
+        const claimedLogPaths = new Set<string>();
+        for (const c of this.configs) {
+            if (c.type === 'process' && c.logFile) {
+                claimedLogPaths.add(path.resolve(c.logFile).toLowerCase());
+            }
+        }
+        if (claimedLogPaths.size > 0) {
+            const dupeFileIds: string[] = [];
+            for (const c of this.configs) {
+                if (c.type !== 'file') { continue; }
+                if (c.manual || c.archived || protectedIds?.has(c.id)) { continue; }
+                const resolved = path.resolve(this.resolvedPaths.get(c.id) ?? this.resolvePath(c.path)).toLowerCase();
+                if (claimedLogPaths.has(resolved)) {
+                    dupeFileIds.push(c.id);
+                    this.output.appendLine(`[dedup] Removing file watcher '${c.name}' — claimed by process watcher`);
+                }
+            }
+            for (const id of dupeFileIds) {
+                this.stopWatcher(id);
+                this.configs = this.configs.filter(c => c.id !== id);
+                removed++;
+            }
+        }
+
+        // 5. Clean up stale auto-discovered watchers
+        const toRemove: string[] = [];
+        for (const config of this.configs) {
+            // Never auto-remove manual, archived, or pinned watchers
+            if (config.manual || config.archived || protectedIds?.has(config.id)) { continue; }
+
+            if (config.type === 'file') {
+                const resolved = this.resolvedPaths.get(config.id) ?? this.resolvePath(config.path);
+                if (!fs.existsSync(resolved)) {
+                    toRemove.push(config.id);
+                }
+            } else if (config.type === 'process') {
+                // Check if any terminal matches the process pattern
+                const pattern = config.path.replace(/\*/g, '.*');
+                const regex = new RegExp(pattern, 'i');
+                const hasMatch = vscode.window.terminals.some(t => regex.test(t.name));
+                if (!hasMatch) {
+                    toRemove.push(config.id);
+                }
+            }
+        }
+
+        for (const id of toRemove) {
+            this.stopWatcher(id);
+            this.configs = this.configs.filter(c => c.id !== id);
+            removed++;
+        }
+
+        if (added > 0 || removed > 0) {
+            await this.saveConfigs();
+            this._onDidChangeConfigs.fire();
+        }
+
+        return { added, removed };
+    }
+
+    /**
+     * Discover a single terminal as it opens.
+     * Called from extension.ts onDidOpenTerminal handler.
+     */
+    async discoverTerminal(terminal: vscode.Terminal): Promise<void> {
+        const termPath = `terminal://${terminal.name}`;
+        const existing = this.configs.find(c => c.path === termPath);
+        if (existing) { return; }
+
+        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        this.configs.push({
+            id, name: terminal.name, type: 'terminal', path: termPath,
+            errorPatterns: [...DEFAULT_ERROR_PATTERNS],
+            warningPatterns: [...DEFAULT_WARNING_PATTERNS],
+            enabled: false,
+        });
+        await this.saveConfigs();
+        this._onDidChangeConfigs.fire();
+    }
+
+    /** Ignored executables that are intermediate / noise processes */
+    private static readonly IGNORED_EXES = new Set([
+        'powershell.exe', 'pwsh.exe', 'cmd.exe', 'bash', 'sh', 'zsh',
+        'conhost.exe', 'wsl.exe', 'explorer.exe', 'code.exe', 'code-insiders.exe',
+        'dotnet.exe', 'node.exe', 'npm.cmd', 'npx.cmd', 'git.exe',
+    ]);
+
+    /**
+     * Extract a log file path from a process command line.
+     * Supports: Tee-Object -FilePath '...', -RedirectStandardOutput '...',
+     * stdout redirect (> or >>), and Linux tee <path>.
+     */
+    private static extractLogFilePath(cmd: string): string | null {
+        // PowerShell Tee-Object -FilePath '<path>' or Tee-Object '<path>'
+        const teeMatch = /Tee-Object\s+(?:-FilePath\s+)?['"]([^'"]+)['"]/i.exec(cmd);
+        if (teeMatch) { return teeMatch[1]; }
+
+        // -RedirectStandardOutput '<path>'
+        const redirectMatch = /-RedirectStandardOutput\s+['"]([^'"]+)['"]/i.exec(cmd);
+        if (redirectMatch) { return redirectMatch[1]; }
+
+        // Shell redirect: > file.log or >> file.log
+        const shellRedirect = /(?:>>?)\s*['"]?([^'"\s]+\.log)['"]?/i.exec(cmd);
+        if (shellRedirect) { return shellRedirect[1]; }
+
+        // Linux tee <path>
+        const teePipe = /\|\s*tee\s+(?:-a\s+)?['"]?([^'"\s]+\.log)['"]?/i.exec(cmd);
+        if (teePipe) { return teePipe[1]; }
+
+        return null;
+    }
+
+    /**
+     * Walk up the process parent chain (via pidInfo) to find a log file path.
+     * Tries the process itself first, then parents up to maxDepth levels.
+     */
+    private static resolveLogFile(
+        cmd: string,
+        parentPid: number | undefined,
+        pidInfo: Map<number, { parentPid: number; cmd: string }>,
+        maxDepth = 3,
+    ): string | null {
+        // Try the process itself
+        const direct = WatcherManager.extractLogFilePath(cmd);
+        if (direct) { return direct; }
+
+        // Walk up parents
+        let currentPid = parentPid;
+        for (let i = 0; i < maxDepth && currentPid !== undefined; i++) {
+            const info = pidInfo.get(currentPid);
+            if (!info) { break; }
+            const found = WatcherManager.extractLogFilePath(info.cmd);
+            if (found) { return found; }
+            currentPid = info.parentPid;
+        }
+        return null;
+    }
+
+    /**
+     * Scan ALL running OS processes via Get-CimInstance Win32_Process.
+     * Returns:
+     *  - procs: workspace-filtered processes (exe not in IGNORED_EXES, cmd contains workspace root)
+     *  - pidInfo: Map of ALL process PIDs to {parentPid, cmd} for parent chain walking
+     */
+    private scanOsProcesses(): { procs: Array<{ pid: number; parentPid: number; name: string; cmd: string }>; pidInfo: Map<number, { parentPid: number; cmd: string }> } {
+        const workRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workRoot) { return { procs: [], pidInfo: new Map() }; }
+
+        const workRootLower = workRoot.toLowerCase().replace(/\\/g, '/');
+
+        try {
+            const psScript = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ForEach-Object { "$($_.ProcessId)|$($_.ParentProcessId)|$($_.Name)|$($_.CommandLine)" }`;
+            const raw = execSync(`powershell -NoProfile -Command "${psScript.replace(/"/g, '\"')}"`, {
+                encoding: 'utf-8',
+                timeout: 15000,
+                windowsHide: true,
+            });
+
+            const allProcs: Array<{ pid: number; parentPid: number; name: string; cmd: string }> = [];
+            const pidInfo = new Map<number, { parentPid: number; cmd: string }>();
+
+            for (const line of raw.split(/\r?\n/)) {
+                if (!line.trim()) { continue; }
+                const firstPipe = line.indexOf('|');
+                if (firstPipe < 0) { continue; }
+                const secondPipe = line.indexOf('|', firstPipe + 1);
+                if (secondPipe < 0) { continue; }
+                const thirdPipe = line.indexOf('|', secondPipe + 1);
+                if (thirdPipe < 0) { continue; }
+
+                const pid = parseInt(line.substring(0, firstPipe), 10);
+                const parentPid = parseInt(line.substring(firstPipe + 1, secondPipe), 10);
+                const name = line.substring(secondPipe + 1, thirdPipe);
+                const cmd = line.substring(thirdPipe + 1);
+
+                if (isNaN(pid)) { continue; }
+
+                // Build full PID info map (ALL processes, for parent chain walking)
+                pidInfo.set(pid, { parentPid, cmd });
+
+                // Filter workspace-relevant, non-ignored processes
+                const exeName = name.toLowerCase();
+                if (WatcherManager.IGNORED_EXES.has(exeName)) { continue; }
+                const cmdLower = cmd.toLowerCase().replace(/\\/g, '/');
+                if (!cmdLower.includes(workRootLower)) { continue; }
+
+                allProcs.push({ pid, parentPid, name, cmd });
+            }
+
+            return { procs: allProcs, pidInfo };
+        } catch (err) {
+            this.output.appendLine(`[scanOsProcesses] Error: ${err}`);
+            return { procs: [], pidInfo: new Map() };
+        }
+    }
+
+    /**
+     * Discover running OS processes that reference the workspace.
+     * Dynamic scanning — no hardcoded service list. Extracts log file paths
+     * by walking the parent process chain to find Tee-Object / redirect targets.
+     */
+    async discoverOsProcesses(protectedIds?: Set<string>): Promise<number> {
+        if (process.platform !== 'win32') { return 0; } // TODO: Linux/Mac support
+
+        const { procs, pidInfo } = this.scanOsProcesses();
+        if (procs.length === 0) { return 0; }
+
+        const existingPids = new Set(
+            this.configs.filter(c => c.type === 'process' && c.pid).map(c => c.pid!)
+        );
+
+        let added = 0;
+
+        for (const proc of procs) {
+            // Skip if PID already tracked
+            if (existingPids.has(proc.pid)) { continue; }
+
+            // Derive a readable name from the exe (strip .exe, PascalCase split)
+            const rawName = proc.name.replace(/\.exe$/i, '');
+            const name = rawName
+                .replace(/([a-z])([A-Z])/g, '$1 $2') // PascalCase -> words
+                .replace(/[._-]/g, ' ')
+                .replace(/Service$/i, '')
+                .trim();
+
+            // Resolve log file via parent chain
+            const logFile = WatcherManager.resolveLogFile(proc.cmd, proc.parentPid, pidInfo);
+            const logFileExists = logFile ? fs.existsSync(logFile) : false;
+
+            const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+            const processKey = `process://${proc.pid}/${rawName}`;
+
+            this.configs.push({
+                id,
+                name,
+                type: 'process',
+                path: processKey,
+                pid: proc.pid,
+                logFile: logFile ?? undefined,
+                logFileExists,
+                errorPatterns: [...DEFAULT_ERROR_PATTERNS],
+                warningPatterns: [...DEFAULT_WARNING_PATTERNS],
+                enabled: false,
+            });
+            existingPids.add(proc.pid);
+            added++;
+            this.output.appendLine(`[Process Discovery] Found ${name} (PID ${proc.pid}${logFile ? ', log: ' + path.basename(logFile) : ', no log'})`);
+        }
+
+        // Update logFile/logFileExists on existing process watchers (in case files appeared)
+        for (const c of this.configs) {
+            if (c.type !== 'process' || !c.pid) { continue; }
+            const info = pidInfo.get(c.pid);
+            if (!info) { continue; }
+            if (!c.logFile) {
+                const logFile = WatcherManager.resolveLogFile(info.cmd, info.parentPid, pidInfo);
+                if (logFile) {
+                    c.logFile = logFile;
+                    c.logFileExists = fs.existsSync(logFile);
+                }
+            } else {
+                c.logFileExists = fs.existsSync(c.logFile);
+            }
+        }
+
+        return added;
     }
 
     async addWatcher(config: WatcherConfig): Promise<void> {
@@ -124,17 +500,29 @@ export class WatcherManager implements vscode.Disposable {
 
         if (config.type === 'file') {
             this.startFileWatcher(config);
+        } else if (config.type === 'process' && config.logFile && config.logFileExists) {
+            // Check if another active watcher is already tailing this same log file
+            const resolvedLog = path.resolve(config.logFile).toLowerCase();
+            const alreadyTailed = this.configs.some(c =>
+                c.id !== config.id && c.enabled && this.fileWatchers.has(c.id)
+                && c.logFile && path.resolve(c.logFile).toLowerCase() === resolvedLog
+            );
+            if (alreadyTailed) {
+                this.output.appendLine(`[${config.name}] Skipping — another watcher already tails ${path.basename(config.logFile)}`);
+                return;
+            }
+            this.startFileWatcher(config, config.logFile);
         }
         // Terminal watchers are handled by the shared terminal listener
     }
 
     // ── File Watching ────────────────────────────────────────────────
 
-    private startFileWatcher(config: WatcherConfig): void {
-        const resolvedPath = this.resolvePath(config.path);
+    private startFileWatcher(config: WatcherConfig, pathOverride?: string): void {
+        const resolvedPath = pathOverride ?? this.resolvePath(config.path);
         this.resolvedPaths.set(config.id, resolvedPath);
 
-        // Start reading from end of file (only new content)
+        // Start reading from current end of file (only new content going forward)
         try {
             const stats = fs.statSync(resolvedPath);
             this.filePositions.set(config.id, stats.size);
@@ -252,36 +640,63 @@ export class WatcherManager implements vscode.Disposable {
         for (const line of lines) {
             if (!line.trim()) { continue; }
 
+            // Try error patterns first
+            let matched = false;
             for (const patternStr of config.errorPatterns) {
                 try {
                     const pattern = new RegExp(patternStr, 'i');
                     const match = pattern.exec(line);
                     if (match) {
-                        this.handleErrorMatch(config, line, match);
-                        break; // One match per line is enough
+                        this.handleErrorMatch(config, line, match, 'error');
+                        matched = true;
+                        break;
                     }
                 } catch {
                     // Invalid regex — skip
                 }
             }
+
+            // Then try warning patterns
+            if (!matched && config.warningPatterns) {
+                for (const patternStr of config.warningPatterns) {
+                    try {
+                        const pattern = new RegExp(patternStr, 'i');
+                        const match = pattern.exec(line);
+                        if (match) {
+                            this.handleErrorMatch(config, line, match, 'warning');
+                            break;
+                        }
+                    } catch {
+                        // Invalid regex — skip
+                    }
+                }
+            }
         }
     }
 
-    private handleErrorMatch(config: WatcherConfig, line: string, match: RegExpExecArray): void {
+    private handleErrorMatch(config: WatcherConfig, line: string, match: RegExpExecArray, severity: 'error' | 'warning'): void {
         // Try to capture multi-line stack traces
         const bufferKey = config.id;
         const existing = this.multiLineBuffer.get(bufferKey);
         if (existing) {
             clearTimeout(existing.timer);
+            // Flush the previous buffered error immediately before starting a new one
+            this.multiLineBuffer.delete(bufferKey);
+            if (existing.error) {
+                this.errorQueue.push(existing.error);
+            }
         }
 
         const message = match.groups?.['message'] ?? match[1] ?? line.trim();
         const file = match.groups?.['file'];
         const lineNum = match.groups?.['line'] ? parseInt(match.groups['line'], 10) : undefined;
 
+        // Extract timestamp from the log line if present (ISO 8601 or common formats)
+        const timestamp = WatcherManager.extractTimestamp(line);
+
         const error: ErrorEntry = {
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-            timestamp: Date.now(),
+            timestamp,
             source: config.name,
             watcherId: config.id,
             message: message.trim(),
@@ -289,6 +704,7 @@ export class WatcherManager implements vscode.Disposable {
             line: lineNum,
             stackTrace: undefined,
             raw: line.trim(),
+            severity,
             status: 'pending',
         };
 
@@ -298,10 +714,32 @@ export class WatcherManager implements vscode.Disposable {
             this.errorQueue.push(error);
         }, 200);
 
-        this.multiLineBuffer.set(bufferKey, { lines: [line], timer });
+        this.multiLineBuffer.set(bufferKey, { lines: [line], timer, error });
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────
+    // ── Public Helpers ──────────────────────────────────────────────────
+
+    /**
+     * For file watchers: returns the resolved absolute path.
+     * For process watchers: searches `logs/` for files matching the process prefix
+     * and returns all matching absolute paths.
+     */
+    getLogFilePaths(id: string): string[] {
+        const config = this.configs.find(c => c.id === id);
+        if (!config) { return []; }
+
+        if (config.type === 'file') {
+            return [this.resolvedPaths.get(id) ?? this.resolvePath(config.path)];
+        }
+
+        if (config.type === 'process' && config.logFile) {
+            return [config.logFile];
+        }
+
+        return [];
+    }
+
+    // ── Private Helpers ──────────────────────────────────────────────
 
     private resolvePath(p: string): string {
         if (path.isAbsolute(p)) { return p; }

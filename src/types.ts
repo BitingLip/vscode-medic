@@ -1,16 +1,28 @@
 export type WatcherType = 'file' | 'terminal' | 'process' | 'web';
 
-export type WatcherCategory = 'Logs' | 'Processes' | 'Web';
+export type WatcherCategory = 'Logs' | 'Terminals' | 'Processes' | 'Web';
 
 export interface WatcherConfig {
     id: string;
     name: string;
     type: WatcherType;
-    /** File path/glob for 'file' watchers, terminal name pattern for 'terminal'/'process' watchers */
+    /** File path for 'file' watchers, terminal:// URI for 'terminal' watchers, process:// key for 'process' watchers */
     path: string;
     /** Regex patterns to match error lines. Use named groups: (?<message>), (?<file>), (?<line>) */
     errorPatterns: string[];
+    /** Regex patterns to match warning lines. Same named groups as errorPatterns. */
+    warningPatterns: string[];
     enabled: boolean;
+    /** True if the watcher was manually added by the user (won't be auto-removed on refresh). */
+    manual?: boolean;
+    /** True if the watcher has been archived by the user. */
+    archived?: boolean;
+    /** OS process ID (for 'process' watchers, updated on each discovery scan). */
+    pid?: number;
+    /** Log file path extracted from the process command line (Tee-Object target, stdout redirect, etc.). */
+    logFile?: string;
+    /** Whether the logFile actually exists on disk (rechecked each discovery). */
+    logFileExists?: boolean;
 }
 
 export interface ErrorEntry {
@@ -23,7 +35,8 @@ export interface ErrorEntry {
     line?: number;
     stackTrace?: string;
     raw: string;
-    status: 'pending' | 'sent' | 'resolved';
+    severity: 'error' | 'warning';
+    status: 'pending' | 'sent' | 'working' | 'attention' | 'error' | 'resolved';
     sentAt?: number;
     agentSessionQuery?: string;
     /** Number of times this error has occurred (1 = first occurrence) */
@@ -53,13 +66,15 @@ export interface ModelInfo {
     name: string;
     vendor: string;
     family: string;
+    version: string;
+    maxInputTokens: number;
 }
 
 /** Known chat modes/agents for the Agent selector */
 export const CHAT_MODES = [
-    { id: 'agent', label: 'Agent', icon: 'codicon-copilot', desc: 'Autonomous coding agent' },
-    { id: 'ask', label: 'Ask', icon: 'codicon-comment-discussion', desc: 'Ask questions without edits' },
-    { id: 'plan', label: 'Plan', icon: 'codicon-list-ordered', desc: 'Plan before making changes' },
+    { id: 'agent', label: 'Agent', icon: 'codicon-agent', desc: 'Autonomous coding agent' },
+    { id: 'ask', label: 'Ask', icon: 'codicon-ask', desc: 'Ask questions without edits' },
+    { id: 'plan', label: 'Plan', icon: 'codicon-tasklist', desc: 'Plan before making changes' },
 ] as const;
 
 export const CUSTOM_AGENTS = [
@@ -100,136 +115,43 @@ export const ERROR_PRESETS: Record<string, string[]> = {
     ],
 };
 
-/** Default watcher configurations for BitingLip services */
-export const DEFAULT_WATCHERS: Omit<WatcherConfig, 'id'>[] = [
-    // ── Logs (file watchers) ──
-    {
-        name: 'Cloud Supervisor',
-        type: 'file',
-        path: 'logs/cloud-supervisor.log',
-        errorPatterns: [
-            '(?:Unhandled exception|Exception)[.:]\\s*(?<message>.+)',
-            '(?:fail|crit):\\s*(?<message>.+)',
-            'at .+ in (?<file>.+):line (?<line>\\d+)',
-        ],
-        enabled: true,
-    },
-    {
-        name: 'Cloud Gateway',
-        type: 'file',
-        path: 'logs/cloud-gateway.log',
-        errorPatterns: [
-            '(?:Unhandled exception|Exception)[.:]\\s*(?<message>.+)',
-            '(?:fail|crit):\\s*(?<message>.+)',
-            'at .+ in (?<file>.+):line (?<line>\\d+)',
-        ],
-        enabled: true,
-    },
-    {
-        name: 'Cloud Admin',
-        type: 'file',
-        path: 'logs/cloud-admin.log',
-        errorPatterns: [
-            '(?:Error|TypeError|ReferenceError|SyntaxError):\\s*(?<message>.+)',
-            '\\[vite\\].*(?:error|Error):\\s*(?<message>.+)',
-        ],
-        enabled: true,
-    },
-    {
-        name: 'Cloud Anthropic',
-        type: 'file',
-        path: 'logs/cloud-anthropic.log',
-        errorPatterns: [
-            '(?:Unhandled exception|Exception)[.:]\\s*(?<message>.+)',
-            '(?:fail|crit):\\s*(?<message>.+)',
-        ],
-        enabled: true,
-    },
-    {
-        name: 'Studio Worker',
-        type: 'file',
-        path: 'logs/studio-worker.log',
-        errorPatterns: [
-            '(?:Unhandled exception|Exception)[.:]\\s*(?<message>.+)',
-            '(?:fail|crit):\\s*(?<message>.+)',
-            'at .+ in (?<file>.+):line (?<line>\\d+)',
-        ],
-        enabled: true,
-    },
-    {
-        name: 'Studio Gateway',
-        type: 'file',
-        path: 'logs/studio-gateway.log',
-        errorPatterns: [
-            '(?:Unhandled exception|Exception)[.:]\\s*(?<message>.+)',
-            '(?:fail|crit):\\s*(?<message>.+)',
-            'at .+ in (?<file>.+):line (?<line>\\d+)',
-        ],
-        enabled: true,
-    },
-    {
-        name: 'Studio Frontend',
-        type: 'file',
-        path: 'logs/studio-frontend.log',
-        errorPatterns: [
-            '(?:Error|TypeError|ReferenceError|SyntaxError):\\s*(?<message>.+)',
-            '\\[vite\\].*(?:error|Error):\\s*(?<message>.+)',
-        ],
-        enabled: true,
-    },
-    {
-        name: 'Node Orchestrator',
-        type: 'file',
-        path: 'logs/node-orchestrator.log',
-        errorPatterns: [
-            '(?:Unhandled exception|Exception)[.:]\\s*(?<message>.+)',
-            '(?:fail|crit):\\s*(?<message>.+)',
-            'at .+ in (?<file>.+):line (?<line>\\d+)',
-        ],
-        enabled: true,
-    },
-    {
-        name: 'Node Frontend',
-        type: 'file',
-        path: 'logs/node-frontend.log',
-        errorPatterns: [
-            '(?:Error|TypeError|ReferenceError|SyntaxError):\\s*(?<message>.+)',
-            '\\[vite\\].*(?:error|Error):\\s*(?<message>.+)',
-        ],
-        enabled: true,
-    },
-    // ── Processes (terminal watchers) ──
-    {
-        name: 'Cloud Processes',
-        type: 'process',
-        path: 'Cloud*',
-        errorPatterns: [
-            '(?:Unhandled exception|Exception)[.:]\\s*(?<message>.+)',
-            '(?:fail|crit):\\s*(?<message>.+)',
-            '(?:Error|TypeError|SyntaxError):\\s*(?<message>.+)',
-        ],
-        enabled: false,
-    },
-    {
-        name: 'Studio Processes',
-        type: 'process',
-        path: 'Studio*',
-        errorPatterns: [
-            '(?:Unhandled exception|Exception)[.:]\\s*(?<message>.+)',
-            '(?:fail|crit):\\s*(?<message>.+)',
-            '(?:Error|TypeError|SyntaxError):\\s*(?<message>.+)',
-        ],
-        enabled: false,
-    },
-    {
-        name: 'Node Processes',
-        type: 'process',
-        path: 'Node*',
-        errorPatterns: [
-            '(?:Unhandled exception|Exception)[.:]\\s*(?<message>.+)',
-            '(?:fail|crit):\\s*(?<message>.+)',
-            '(?:Error|TypeError|SyntaxError):\\s*(?<message>.+)',
-        ],
-        enabled: false,
-    },
+/** Built-in warning pattern presets */
+export const WARNING_PRESETS: Record<string, string[]> = {
+    'Generic': [
+        '(?:^|\\s)(?:WARN|WARNING)[:\\s]+(?<message>.+)',
+    ],
+    '.NET / C#': [
+        '(?:warn):\\s*(?<message>.+)',
+    ],
+    'Python': [
+        '(?:Warning|DeprecationWarning|UserWarning|RuntimeWarning):\\s*(?<message>.+)',
+    ],
+    'Node.js': [
+        '\\(node:\\d+\\)\\s*(?<message>.+Warning.+)',
+        '(?:Warning|DeprecationWarning):\\s*(?<message>.+)',
+    ],
+    'Rust': [
+        'warning\\[?[^\\]]*\\]?:\\s*(?<message>.+)',
+    ],
+    'Go': [
+        '(?:warning):\\s*(?<message>.+)',
+    ],
+};
+
+/** Default error patterns for dynamically discovered log files */
+export const DEFAULT_ERROR_PATTERNS: string[] = [
+    '(?:Unhandled exception|Exception)[.:]\\s*(?<message>.+)',
+    '(?:fail|crit):\\s*(?<message>.+)',
+    '(?:Error|TypeError|ReferenceError|SyntaxError):\\s*(?<message>.+)',
+    '\\[vite\\].*(?:error|Error):\\s*(?<message>.+)',
+    '\\b(?:ERR|FTL|CRT)\\]\\s*(?<message>.+)',
+    'at .+ in (?<file>.+):line (?<line>\\d+)',
+];
+
+/** Default warning patterns for dynamically discovered log files */
+export const DEFAULT_WARNING_PATTERNS: string[] = [
+    '(?:warn):\\s*(?<message>.+)',
+    '(?:Warning|DeprecationWarning):\\s*(?<message>.+)',
+    '\\[vite\\].*(?:warn|Warning):\\s*(?<message>.+)',
+    '\\bWRN\\]\\s*(?<message>.+)',
 ];

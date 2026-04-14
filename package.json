@@ -122,6 +122,29 @@
                 "title": "Mark Error as Fixed",
                 "category": "MEDIC",
                 "icon": "$(pass)"
+            },
+            {
+                "command": "errorPilot.markWorking",
+                "title": "Mark Error as Working",
+                "category": "MEDIC",
+                "icon": "$(copilot)"
+            },
+            {
+                "command": "errorPilot.markAttention",
+                "title": "Mark Error as Needs Attention",
+                "category": "MEDIC",
+                "icon": "$(copilot-warning)"
+            },
+            {
+                "command": "errorPilot.markAgentError",
+                "title": "Mark Error as Agent Error",
+                "category": "MEDIC",
+                "icon": "$(copilot-error)"
+            },
+            {
+                "command": "errorPilot.demoLifecycle",
+                "title": "Demo: Error Lifecycle",
+                "category": "MEDIC"
             }
         ],
         "menus": {
@@ -263,6 +286,20 @@
                         "Send into the currently active chat session"
                     ],
                     "description": "Whether to open a new chat session or use the active one"
+                },
+                "errorPilot.watchdog.sentTimeoutMinutes": {
+                    "type": "number",
+                    "default": 2,
+                    "minimum": 0.5,
+                    "maximum": 60,
+                    "description": "Minutes to wait for agent to start working before escalating to attention"
+                },
+                "errorPilot.watchdog.workingTimeoutMinutes": {
+                    "type": "number",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 120,
+                    "description": "Minutes to wait for agent to finish before escalating to attention"
                 }
             }
         }

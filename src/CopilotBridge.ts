@@ -5,8 +5,15 @@ import { ErrorQueue } from './ErrorQueue';
 export class CopilotBridge implements vscode.Disposable {
     private debounceTimer: ReturnType<typeof setTimeout> | undefined;
     private disposables: vscode.Disposable[] = [];
+    /** Watchdog timers keyed by error ID */
+    private watchdogTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-    constructor(private readonly errorQueue: ErrorQueue) {}
+    constructor(private readonly errorQueue: ErrorQueue) {
+        // Listen for status changes to manage watchdog timers
+        this.disposables.push(
+            this.errorQueue.onDidChange(() => this.updateWatchdogs()),
+        );
+    }
 
     /** Send a single error to Copilot Chat */
     async sendError(error: ErrorEntry, guidingPrompt?: string, mode?: string, model?: string, newSession: boolean = true): Promise<void> {
@@ -15,13 +22,12 @@ export class CopilotBridge implements vscode.Disposable {
         this.errorQueue.markSent(error.id, prompt);
     }
 
-    /** Re-open a Copilot Chat session with the same prompt used when the error was sent */
-    async reopenSession(error: ErrorEntry): Promise<void> {
-        if (error.agentSessionQuery) {
-            await this.openChat(error.agentSessionQuery);
-        } else {
-            const prompt = this.buildPrompt(error);
-            await this.openChat(prompt);
+    /** Focus the Copilot Chat panel to show the existing session */
+    async reopenSession(_error: ErrorEntry): Promise<void> {
+        try {
+            await vscode.commands.executeCommand('workbench.action.chat.open');
+        } catch {
+            // ignore — chat panel may not be available
         }
     }
 
@@ -41,7 +47,10 @@ export class CopilotBridge implements vscode.Disposable {
             }
             prompt += '\n';
         }
-        prompt += '---\nAfter fixing each error, run the VS Code command `errorPilot.resolveError` with the corresponding MEDIC ID to mark it as resolved.\n';
+        prompt += '---\nFor each error, run `errorPilot.markWorking` with its MEDIC ID when you start working on it.\n';
+        prompt += 'If you need user input or attention, run `errorPilot.markAttention` with the MEDIC ID and a reason string.\n';
+        prompt += 'If you cannot fix an error, run `errorPilot.markAgentError` with the MEDIC ID and a reason string.\n';
+        prompt += 'After fixing each error, run `errorPilot.resolveError` with the corresponding MEDIC ID to mark it as resolved.\n';
         prompt += `Error IDs: ${errors.map(e => `\`${e.id}\``).join(', ')}\n`;
 
         if (guidingPrompt) {
@@ -76,8 +85,11 @@ export class CopilotBridge implements vscode.Disposable {
             prompt += '\n';
         }
 
-        // Append resolve instructions for each error
-        prompt += '---\nAfter fixing each error, run the VS Code command `errorPilot.resolveError` with the corresponding MEDIC ID to mark it as resolved.\n';
+        // Append status-management instructions for each error
+        prompt += '---\nFor each error, run `errorPilot.markWorking` with its MEDIC ID when you start working on it.\n';
+        prompt += 'If you need user input or attention, run `errorPilot.markAttention` with the MEDIC ID and a reason string.\n';
+        prompt += 'If you cannot fix an error, run `errorPilot.markAgentError` with the MEDIC ID and a reason string.\n';
+        prompt += 'After fixing each error, run the VS Code command `errorPilot.resolveError` with the corresponding MEDIC ID to mark it as resolved.\n';
         prompt += `Error IDs: ${pending.map(e => `\`${e.id}\``).join(', ')}\n`;
 
         if (guidingPrompt) {
@@ -100,6 +112,8 @@ export class CopilotBridge implements vscode.Disposable {
         const disposable = this.errorQueue.onNewError((error) => {
             const config = vscode.workspace.getConfiguration('errorPilot');
             if (!config.get<boolean>('autoTrigger', false)) { return; }
+            // In "confirm" mode, never auto-send — user must explicitly dispatch
+            if (config.get<string>('approvalMode', 'confirm') !== 'auto') { return; }
 
             const debounceMs = config.get<number>('debounceMs', 3000);
 
@@ -108,7 +122,7 @@ export class CopilotBridge implements vscode.Disposable {
             }
 
             this.debounceTimer = setTimeout(() => {
-                this.sendError(error);
+                this.sendAllPending(undefined, undefined, undefined, false);
             }, debounceMs);
         });
 
@@ -143,7 +157,11 @@ export class CopilotBridge implements vscode.Disposable {
         prompt = prompt.replace(/\n{3,}/g, '\n\n').trim();
 
         // Append resolve instruction so the agent can mark the error as fixed
-        prompt += `\n\n---\n**MEDIC ID:** \`${error.id}\`\nAfter you have fixed this error, run the VS Code command \`errorPilot.resolveError\` with argument \`${error.id}\` to mark it as resolved in the MEDIC dashboard.`;
+        prompt += `\n\n---\n**MEDIC ID:** \`${error.id}\``;
+        prompt += `\nWhen you start working on this error, run \`errorPilot.markWorking\` with argument \`${error.id}\`.`;
+        prompt += `\nIf you need user input or attention, run \`errorPilot.markAttention\` with arguments \`${error.id}\` and a reason string.`;
+        prompt += `\nIf you cannot fix this error, run \`errorPilot.markAgentError\` with arguments \`${error.id}\` and a reason string.`;
+        prompt += `\nAfter you have fixed this error, run \`errorPilot.resolveError\` with argument \`${error.id}\` to mark it as resolved.`;
 
         if (guidingPrompt) {
             prompt += `\n\n**User note:**\n${guidingPrompt}`;
@@ -192,6 +210,59 @@ export class CopilotBridge implements vscode.Disposable {
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);
         }
+        for (const timer of this.watchdogTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.watchdogTimers.clear();
         this.disposables.forEach((d) => d.dispose());
+    }
+
+    // ── Watchdog ─────────────────────────────────────────────────────
+
+    /** Evaluate all active errors and start/clear watchdog timers as needed */
+    private updateWatchdogs(): void {
+        const config = vscode.workspace.getConfiguration('errorPilot');
+        const sentTimeoutMin = config.get<number>('watchdog.sentTimeoutMinutes', 2);
+        const workingTimeoutMin = config.get<number>('watchdog.workingTimeoutMinutes', 10);
+
+        const activeErrors = this.errorQueue.getAll().filter(
+            (e) => e.status === 'sent' || e.status === 'working',
+        );
+        const activeIds = new Set(activeErrors.map((e) => e.id));
+
+        // Clear timers for errors no longer in an active state
+        for (const [id, timer] of this.watchdogTimers) {
+            if (!activeIds.has(id)) {
+                clearTimeout(timer);
+                this.watchdogTimers.delete(id);
+            }
+        }
+
+        // Start timers for errors that don't have one yet
+        for (const error of activeErrors) {
+            if (this.watchdogTimers.has(error.id)) { continue; }
+
+            const timeoutMs = error.status === 'sent'
+                ? sentTimeoutMin * 60_000
+                : workingTimeoutMin * 60_000;
+
+            const elapsed = Date.now() - (error.sentAt ?? error.timestamp);
+            const remaining = Math.max(timeoutMs - elapsed, 0);
+
+            const timer = setTimeout(() => {
+                this.watchdogTimers.delete(error.id);
+                // Re-check: the status may have changed since the timer was set
+                const current = this.errorQueue.getAll().find((e) => e.id === error.id);
+                if (!current) { return; }
+                if (current.status === 'sent' || current.status === 'working') {
+                    this.errorQueue.markAttention(error.id);
+                    vscode.window.showWarningMessage(
+                        `MEDIC: Job "${current.message.slice(0, 50)}" timed out (was ${current.status}). Escalated to attention.`,
+                    );
+                }
+            }, remaining);
+
+            this.watchdogTimers.set(error.id, timer);
+        }
     }
 }

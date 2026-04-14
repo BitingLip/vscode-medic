@@ -21,9 +21,15 @@ export class ErrorQueue implements vscode.Disposable {
         );
 
         if (existing) {
-            // Bump occurrence count and timestamp
+            // Bump occurrence count; only update lastSeenAt if newer
             existing.occurrences = (existing.occurrences ?? 1) + 1;
-            existing.lastSeenAt = error.timestamp;
+            if (error.timestamp > (existing.lastSeenAt ?? 0)) {
+                existing.lastSeenAt = error.timestamp;
+            }
+            // Keep the oldest timestamp as the original
+            if (error.timestamp < existing.timestamp) {
+                existing.timestamp = error.timestamp;
+            }
             this._onDidChange.fire();
             // Don't fire onNewError — no need to trigger agent for duplicates
             return;
@@ -58,6 +64,30 @@ export class ErrorQueue implements vscode.Disposable {
             error.status = 'sent';
             error.sentAt = Date.now();
             if (query) { error.agentSessionQuery = query; }
+            this._onDidChange.fire();
+        }
+    }
+
+    markWorking(id: string): void {
+        const error = this.errors.find((e) => e.id === id);
+        if (error) {
+            error.status = 'working';
+            this._onDidChange.fire();
+        }
+    }
+
+    markAttention(id: string): void {
+        const error = this.errors.find((e) => e.id === id);
+        if (error) {
+            error.status = 'attention';
+            this._onDidChange.fire();
+        }
+    }
+
+    markAgentError(id: string): void {
+        const error = this.errors.find((e) => e.id === id);
+        if (error) {
+            error.status = 'error';
             this._onDidChange.fire();
         }
     }

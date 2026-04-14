@@ -17,11 +17,30 @@ html, body {
    ═══════════════════════════════════════════════════════════════ */
 
 .error-pilot-viewpane {
+    /* ── Status colors (single source of truth) ── */
+    --medic-color-warning: #cca700;
+    --medic-color-error: #d86a6a;
+    --medic-color-success: #87ce83;
+    --medic-color-pending: #cbcbcb;
+    --medic-color-active: #59a4f9;
+    --medic-color-paused: #3c3c3c;
+
     display: flex;
     flex-direction: row;
     height: 100vh;
     overflow: hidden;
 }
+
+/* ── Unified status color classes ──────────────────────────────── */
+.status-warning  { color: var(--medic-color-warning); }
+.status-error    { color: var(--medic-color-error); }
+.status-sent     { color: var(--medic-color-success); }
+.status-working  { color: var(--medic-color-active); }
+.status-attention{ color: var(--medic-color-warning); }
+.status-resolved { color: var(--medic-color-success); }
+.status-pending  { color: var(--medic-color-pending); }
+.status-active   { color: var(--medic-color-active); }
+.status-paused   { color: var(--medic-color-paused); }
 
 /* ── Left: Error Feed Container ────────────────────────────────── */
 
@@ -51,9 +70,9 @@ html, body {
 /* ── Right: Watchers Sidebar ───────────────────────────────────── */
 
 .watchers-sidebar {
-    width: 320px;
-    min-width: 180px;
-    max-width: 400px;
+    width: 360px;
+    min-width: 200px;
+    max-width: 420px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -113,12 +132,13 @@ html, body {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 12px;
+    padding: 0 12px 0 20px;
     height: 24px;
     min-height: 24px;
     flex-shrink: 0;
     cursor: pointer;
     user-select: none;
+    margin-top: -1px;
 }
 
 .error-feed-title:hover {
@@ -137,19 +157,76 @@ html, body {
 }
 
 .error-feed-title-count {
-    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
     color: var(--vscode-descriptionForeground);
 }
 
-.error-feed-title-count.has-pending {
-    color: var(--vscode-errorForeground);
+.feed-count-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 3px;
+    transition: opacity 0.15s;
+    position: relative;
+}
+
+.feed-count-group:hover {
+    background: rgba(255,255,255,0.06);
+}
+
+.feed-count-group.inactive {
+    opacity: 0.35;
+}
+
+/* Slash overlay — hidden when active, shown when inactive */
+.feed-count-slash {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.feed-count-group.inactive .feed-count-slash {
+    display: flex;
+}
+
+.feed-count-num {
     font-weight: 600;
+    font-size: 11px;
+}
+
+.feed-count-icon {
+    display: flex;
+    align-items: center;
+}
+
+.feed-count-icon .codicon {
+    font-size: 13px;
+}
+
+[data-severity="warning"] .feed-count-icon .codicon {
+    color: var(--medic-color-warning);
+}
+
+[data-severity="error"] .feed-count-icon .codicon {
+    color: var(--medic-color-error);
 }
 
 .error-feed-title-actions {
     display: flex;
-    gap: 2px;
+    gap: 10px;
     margin-left: auto;
+}
+
+.error-feed-title-actions .icon-btn .codicon {
+    color: #cccccc;
 }
 
 #feed-title-show-sidebar {
@@ -171,6 +248,7 @@ html, body {
     height: 24px;
     min-height: 24px;
     flex-shrink: 0;
+    margin-top: -1px;
 }
 
 .watchers-title {
@@ -184,7 +262,7 @@ html, body {
 
 .watchers-toolbar {
     display: flex;
-    gap: 2px;
+    gap: 4px;
 }
 
 .watchers-toolbar .icon-btn {
@@ -193,6 +271,11 @@ html, body {
 
 .watchers-toolbar .icon-btn .codicon {
     font-size: 16px;
+    color: #cccccc;
+}
+
+.watchers-toolbar .icon-btn:last-child {
+    margin-right: 4px;
 }
 
 .watchers-search-bar {
@@ -259,7 +342,8 @@ html, body {
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 6px 8px;
+    padding: 6px 8px 6px 16px;
+    margin: 2px 0 0 0;
     cursor: pointer;
     user-select: none;
     font-size: 11px;
@@ -276,6 +360,7 @@ html, body {
 .watcher-section-chevron {
     font-size: 12px !important;
     transition: transform 0.15s ease;
+    display: none;
 }
 
 .watcher-section.collapsed .watcher-section-chevron {
@@ -285,15 +370,16 @@ html, body {
 .watcher-section-label { flex: 1; }
 
 .watcher-section-count {
-    font-size: 10px;
-    color: #9d9d9d;
-    margin-right: 4px;
+    font-size: 11px;
+    color: #6d6d6d;
+    margin-right: 6px;
 }
 
 .watcher-section-icon {
     font-size: 12px !important;
-    margin-right: 4px;
+    margin-right: 6px;
     color: #9d9d9d;
+    display: none;
 }
 
 .watcher-section-empty {
@@ -314,8 +400,8 @@ html, body {
     flex-wrap: wrap;
     align-items: flex-start;
     gap: 0;
-    margin: 2px 6px;
-    padding: 8px 6px 8px 8px;
+    margin: 0 6px;
+    padding: 5px 6px 10px 8px;
     border-radius: 6px;
     cursor: pointer;
     transition: background 0.1s;
@@ -335,59 +421,42 @@ html, body {
 .watcher-line-1 {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     width: 100%;
+    margin-bottom: 1px;
 }
 
-.watcher-status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
+/* Watcher status icons (codicon-based, replaces old colored dots) */
+.watcher-status-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
     flex-shrink: 0;
-    margin-right: 6px;
+    margin-left: -4px;
+    margin-right: 0;
+    margin-top: 2px;
 }
 
-/* Grey small dot for inactive */
-.watcher-status-dot.paused {
-    width: 5px;
-    height: 5px;
-    margin-right: 7px;
-    background: var(--vscode-descriptionForeground, #888);
-    opacity: 0.5;
+.watcher-status-icon .codicon {
+    font-size: 14px;
 }
 
-/* Blue normal dot for active */
-.watcher-status-dot.active {
-    background: var(--vscode-focusBorder, #4daafc);
+/* Non-grey (active) status icons: larger & 8px visual margin each side */
+.watcher-status-icon:not(.status-paused) .codicon {
+    font-size: 16px;
+}
+.watcher-status-icon:not(.status-paused) {
+    margin-left: -4px;
+    margin-right: 0;
 }
 
-/* Blue spinning ring when agent is working on an error */
-.watcher-status-dot.agent-working {
-    width: 10px;
-    height: 10px;
-    margin-top: -2px;
-    margin-bottom: -2px;
-    margin-left: -2px;
-    margin-right: 4px;
-    background: transparent;
-    border: 1.5px solid var(--vscode-focusBorder, #4daafc);
-    border-top-color: transparent;
-    animation: dot-spin 0.8s linear infinite;
-}
-
-@keyframes dot-spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-}
-
-/* Amber dot for pending errors not being worked on */
-.watcher-status-dot.has-errors {
-    background: var(--vscode-editorWarning-foreground, #cca700);
-}
+/* Watcher status colors handled by unified .status-* classes */
 
 .watcher-name {
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 400;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -408,14 +477,14 @@ html, body {
 .watcher-item-actions .icon-btn {
     background: transparent;
     border: none;
-    color: var(--vscode-foreground);
+    color: #cccccc;
     opacity: 0.6;
 }
 
 .watcher-item-actions .icon-btn:hover {
     background: transparent;
     opacity: 1;
-    color: var(--vscode-foreground);
+    color: #cccccc;
 }
 
 .watcher-item-actions .icon-btn .codicon {
@@ -429,7 +498,7 @@ html, body {
     align-items: center;
     gap: 6px;
     width: 100%;
-    padding-left: 20px;
+    padding-left: 16px;
 }
 
 .watcher-path {
@@ -442,14 +511,404 @@ html, body {
     min-width: 0;
 }
 
+/* Process watcher line-2 states */
+.process-sep {
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.5;
+    margin: 0 2px;
+}
+
+.process-log-linked {
+    color: var(--vscode-descriptionForeground);
+}
+
+.process-log-waiting {
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    font-style: italic;
+}
+
+.process-log-none {
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.6;
+    font-style: italic;
+}
+
+.process-not-running {
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.6;
+}
+
+/* ── Process Group (log-file grouped) ──────────────────────────── */
+
+.watcher-group-item {
+    border-left: none;
+}
+
+.watcher-group-item:hover {
+}
+
+.watcher-group-item.selected {
+}
+
+.watcher-group-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--vscode-descriptionForeground);
+    font-size: 10px;
+    font-weight: 600;
+    margin-right: 4px;
+    flex-shrink: 0;
+}
+
+.watcher-group-members {
+    width: 100%;
+    padding: 4px 0 2px 20px;
+}
+
+.watcher-group-member {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    border-radius: 3px;
+}
+
+.watcher-group-member:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.watcher-group-member .codicon {
+    font-size: 12px;
+    opacity: 0.4;
+}
+
+.watcher-group-member-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.watcher-group-member-pid {
+    font-size: 11px;
+    opacity: 0.6;
+    flex-shrink: 0;
+}
+
 .watcher-error-count {
     font-size: 11px;
     font-weight: 600;
-    color: var(--vscode-errorForeground, #f44);
+    color: var(--vscode-descriptionForeground);
     flex-shrink: 0;
 }
 
 .watcher-error-count.zero { display: none; }
+
+/* Third line: error/warning counts */
+.watcher-line-3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding-left: 16px;
+    margin-top: 2px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.watcher-line-3.zero { display: none; }
+
+.watcher-count-warn,
+.watcher-count-err {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.watcher-count-warn { color: var(--medic-color-warning); }
+.watcher-count-warn .codicon { color: var(--medic-color-warning); font-size: 12px; }
+.watcher-count-err { color: var(--medic-color-error); }
+.watcher-count-err .codicon { color: var(--medic-color-error); font-size: 12px; }
+
+/* ── Global Filter Bar (bottom of watcher sidebar) ── */
+.watchers-filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 4px 8px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+    min-height: 24px;
+}
+
+.filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #cccccc;
+    transition: opacity 0.15s;
+    position: relative;
+}
+
+.filter-toggle:hover {
+    background: rgba(255,255,255,0.06);
+}
+
+.filter-toggle.active .filter-toggle-icon .codicon {
+    color: #cccccc;
+}
+
+.filter-toggle.inactive {
+    opacity: 0.35;
+}
+
+/* Slash overlay — hidden when active, shown when inactive */
+.filter-toggle-slash {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.filter-toggle.inactive .filter-toggle-slash {
+    display: flex;
+}
+
+.filter-toggle-icon {
+    display: flex;
+    align-items: center;
+    position: relative;
+}
+
+.filter-toggle-icon .codicon {
+    font-size: 14px;
+}
+
+[data-severity="error"] .filter-toggle-icon .codicon {
+    color: var(--medic-color-error);
+}
+
+[data-severity="warning"] .filter-toggle-icon .codicon {
+    color: var(--medic-color-warning);
+}
+
+.filter-toggle-count {
+    font-size: 11px;
+}
+
+/* ── Shared slash overlay icon (dark shadow behind, white front) ── */
+.slash-shadow,
+.slash-front {
+    font-size: 16px;
+    position: absolute;
+    transform: rotate(-45deg);
+}
+
+.slash-shadow {
+    color: #181818;
+    /* offset to create outline/shade effect */
+    top: 0px;
+    left: 0px;
+    text-shadow:
+        1px 0 0 #181818,
+        -1px 0 0 #181818,
+        0 1px 0 #181818,
+        0 -1px 0 #181818;
+}
+
+.slash-front {
+    color: #cccccc;
+    top: 0px;
+    left: 0px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   § 3.35 — Todo List
+   ═══════════════════════════════════════════════════════════════ */
+
+.todo-list {
+    flex-shrink: 0;
+    margin: 0 8px 0 12px;
+    background: #1f1f1f;
+    border: 1px solid #313131;
+    border-radius: 10px 10px 0 0;
+    border-bottom: none;
+}
+
+.todo-list.hidden { display: none; }
+
+/* When todo-list is visible, remove top rounding from compose-box */
+.todo-list:not(.hidden) + .compose-box {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-top-color: #313131;
+}
+
+.todo-list:not(.hidden) + .compose-box:focus-within {
+    border-top-color: var(--vscode-focusBorder, #4daafc);
+}
+
+.todo-list-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px 0 6px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.todo-list.collapsed .todo-list-header {
+    padding-bottom: 4px;
+}
+
+.todo-list-header:hover {
+    opacity: 0.85;
+}
+
+.todo-list-chevron {
+    font-size: 16px !important;
+    color: #cccccc;
+    margin: 0;
+    transition: transform 0.15s ease;
+}
+
+.todo-list.collapsed .todo-list-chevron {
+    transform: rotate(-90deg);
+}
+
+.todo-list-title {
+    font-size: 12px;
+    font-weight: 400;
+    color: #cccccc;
+}
+
+.todo-list-count {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.todo-list-collapsed-preview {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: #cccccc;
+}
+
+.todo-list-collapsed-preview .codicon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.todo-list-collapsed-preview .todo-preview-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Collapsed preview icon colors now handled by unified .status-* classes */
+
+/* When collapsed: hide title/count, show preview */
+.todo-list.collapsed .todo-list-title,
+.todo-list.collapsed .todo-list-count { display: none; }
+
+.todo-list.collapsed .todo-list-collapsed-preview { display: inline-flex; }
+
+.todo-list-clear {
+    opacity: 0;
+    transition: opacity 0.15s;
+    margin-left: auto;
+}
+
+.todo-list-header:hover .todo-list-clear { opacity: 0.6; }
+.todo-list-clear:hover { opacity: 1 !important; }
+
+.todo-list.collapsed .todo-list-items { display: none; }
+
+.todo-list-items {
+    padding: 2px 0 6px;
+}
+
+.todo-item {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 4px 10px 4px 8px;
+    font-size: 12px;
+    line-height: 22px;
+    min-height: 22px;
+}
+
+.todo-item.clickable {
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.todo-item.clickable:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.todo-item-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    margin: 0 6px 0 0;
+}
+
+.todo-item-icon .codicon { font-size: 14px; }
+
+/* Todo icon colors now handled by unified .status-* classes */
+
+.todo-item-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #cccccc;
+    font-size: 12px;
+}
+
+.todo-item-time {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    flex-shrink: 0;
+}
+
+.todo-item.fade-out {
+    animation: todoFadeOut 0.3s ease forwards;
+}
+
+@keyframes todoFadeOut {
+    from { opacity: 1; max-height: 22px; }
+    to   { opacity: 0; max-height: 0; padding: 0 12px 0 28px; }
+}
 
 /* ═══════════════════════════════════════════════════════════════
    § 3.4 — Error Feed
@@ -482,6 +941,120 @@ html, body {
 }
 
 .error-feed-jump.visible { display: inline-flex; }
+
+/* ── Error Feed Sections ───────────────────────────────────────── */
+
+.error-feed-section {
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.error-feed-section:last-child {
+    border-bottom: none;
+}
+
+.error-feed-section-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px 6px 16px;
+    cursor: pointer;
+    user-select: none;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--vscode-sideBar-background);
+}
+
+.error-feed-section-header:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.error-feed-section-chevron {
+    font-size: 14px !important;
+    transition: transform 0.15s ease;
+}
+
+.error-feed-section.collapsed .error-feed-section-chevron {
+    transform: rotate(-90deg);
+}
+
+.error-feed-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.error-feed-section-counts {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.error-feed-section-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 3px;
+    transition: opacity 0.15s;
+}
+
+.error-feed-section-count:hover {
+    background: rgba(255,255,255,0.06);
+}
+
+.error-feed-section-count.inactive {
+    opacity: 0.35;
+}
+
+.error-feed-section-count .codicon {
+    font-size: 12px;
+}
+
+.error-feed-section-count.count-err { color: var(--medic-color-error); }
+.error-feed-section-count.count-err .codicon { color: var(--medic-color-error); }
+.error-feed-section-count.count-warn { color: var(--medic-color-warning); }
+.error-feed-section-count.count-warn .codicon { color: var(--medic-color-warning); }
+
+.error-feed-section-delete {
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.error-feed-section-header:hover .error-feed-section-delete {
+    opacity: 0.6;
+}
+
+.error-feed-section-delete:hover {
+    opacity: 1 !important;
+}
+
+.error-feed-section-list {
+    overflow: hidden;
+}
+
+.error-feed-section.collapsed .error-feed-section-list {
+    display: none;
+}
+
+.error-feed-section.empty {
+    display: none;
+}
+
+/* Smooth animation for items entering a section */
+.error-item-container.section-enter {
+    animation: sectionSlideIn 0.3s ease-out;
+}
+
+@keyframes sectionSlideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
 
 /* ── Error items ──────────────────────────────────────────────── */
 
@@ -546,30 +1119,9 @@ html, body {
     font-size: 12px;
 }
 
-.error-item-container.sent { opacity: 0.7; }
+/* sent/resolved no longer dimmed — handled via sections */
 
-/* ── Occurrence count badge ────────────────────────────────────── */
-
-.error-occurrence-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
-    border-radius: 9px;
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--vscode-descriptionForeground);
-    font-size: 11px;
-    font-weight: 600;
-    flex-shrink: 0;
-    line-height: 1;
-    transition: transform 0.15s ease;
-}
-
-.error-occurrence-badge.pulse {
-    animation: occurrencePulse 0.4s ease-out;
-}
+/* ── Occurrence count badge (now in type sidebar) ──────────────── */
 
 @keyframes occurrencePulse {
     0%   { transform: scale(1);   background: rgba(255, 255, 255, 0.08); }
@@ -577,7 +1129,7 @@ html, body {
     100% { transform: scale(1);   background: rgba(255, 255, 255, 0.08); }
 }
 
-.error-item-container.sending .severity-icon .codicon {
+.error-item-container.sending .error-code-type .codicon {
     animation: spin 1s linear infinite;
 }
 
@@ -595,6 +1147,26 @@ html, body {
     margin-bottom: 6px;
 }
 
+.error-status-icon {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.error-status-icon .codicon { font-size: 14px; }
+
+/* Clickable severity icon (for active session statuses) */
+.severity-icon.clickable {
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 2px;
+    margin: -2px;
+}
+
+.severity-icon.clickable:hover {
+    background: rgba(255,255,255,0.1);
+}
+
 .error-header-right {
     display: flex;
     align-items: center;
@@ -602,27 +1174,6 @@ html, body {
     flex-shrink: 0;
     margin-left: auto;
 }
-
-.severity-icon {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    background: var(--vscode-chat-avatarBackground, rgba(255,255,255,0.1));
-    color: var(--vscode-chat-avatarForeground, var(--vscode-foreground));
-}
-
-.severity-icon .codicon { font-size: 14px; }
-
-.severity-icon.severity-error   { color: var(--vscode-errorForeground); }
-.severity-icon.severity-warning { color: var(--vscode-editorWarning-foreground); }
-.severity-icon.severity-info    { color: var(--vscode-editorInfo-foreground); }
-.severity-icon.status-sending   { color: var(--vscode-progressBar-background, #0078d4); }
-.severity-icon.status-sent      { color: var(--vscode-textLink-foreground, #3794ff); }
-.severity-icon.status-resolved  { color: var(--vscode-testing-iconPassed, #4c4); }
 
 .error-source {
     font-size: 13px;
@@ -672,9 +1223,12 @@ html, body {
     margin-right: auto;
 }
 
-.error-status-inline.sending  { color: var(--vscode-progressBar-background, #0078d4); }
-.error-status-inline.sent     { color: var(--vscode-textLink-foreground, #3794ff); }
-.error-status-inline.resolved { color: var(--vscode-testing-iconPassed, #4c4); }
+.error-status-inline.sending  { color: var(--medic-color-success); }
+.error-status-inline.sent     { color: var(--medic-color-success); }
+.error-status-inline.working  { color: var(--medic-color-active); }
+.error-status-inline.attention { color: var(--medic-color-warning); }
+.error-status-inline.error    { color: var(--medic-color-error); }
+.error-status-inline.resolved { color: var(--medic-color-success); }
 
 /* ── Error body ────────────────────────────────────────────────── */
 
@@ -685,10 +1239,49 @@ html, body {
 /* ── Error code box (message content) ──────────────────────────── */
 
 .error-code-box {
-    position: relative;
-    background: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.25));
+    display: flex;
     border-radius: 6px;
     margin-bottom: 4px;
+    overflow: hidden;
+    border: 1px solid #3c3c3c;
+}
+
+
+
+.error-code-type {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 38px;
+    padding: 8px 4px;
+    background: #1f1f1f;
+    border-right: 1px solid #3c3c3c;
+    flex-shrink: 0;
+}
+
+.error-code-type .codicon { font-size: 16px; }
+
+.error-code-type.severity-error   { color: var(--medic-color-error); }
+.error-code-type.severity-warning { color: var(--medic-color-warning); }
+
+.error-code-type-count {
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    opacity: 0.85;
+}
+
+.error-code-type-count.pulse {
+    animation: occurrencePulse 0.4s ease-out;
+}
+
+.error-code-main {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    background: #313131;
     overflow: hidden;
 }
 
@@ -702,7 +1295,7 @@ html, body {
     overflow: hidden;
 }
 
-.error-code-box:not(.expanded) .error-code-content {
+.error-code-box.overflows:not(.expanded) .error-code-content {
     max-height: calc(1.5em * 6);
     overflow-y: auto;
     scrollbar-width: thin;
@@ -715,7 +1308,7 @@ html, body {
     width: 22px;
     height: 22px;
     border: none;
-    background: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.4));
+    background: rgba(0,0,0,0.4);
     color: var(--vscode-foreground);
     cursor: pointer;
     border-radius: 4px;
@@ -797,24 +1390,67 @@ html, body {
 /* ── Error context (file references) ──────────────────────────── */
 
 .error-context {
-    margin-top: 6px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
+    margin-top: 6px;
+    margin-bottom: 4px;
+    overflow: hidden;
 }
 
 .error-context-file {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    color: var(--vscode-textLink-foreground);
+    display: flex;
+    align-items: stretch;
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+    overflow: hidden;
     cursor: pointer;
-    text-decoration: none;
+    transition: background 0.1s;
+    margin-bottom: 2px;
 }
 
-.error-context-file:hover { text-decoration: underline; }
-.error-context-file .codicon { font-size: 12px; }
+.error-context-file:hover {
+    border-color: #505050;
+}
+
+.error-context-line-col {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 38px;
+    padding: 4px 4px;
+    background: #1f1f1f;
+    border-right: 1px solid #3c3c3c;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    flex-shrink: 0;
+}
+
+.error-context-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    padding: 4px 10px;
+    background: #313131;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px;
+    color: #e0e0e0;
+}
+
+.error-context-name .codicon {
+    font-size: 12px;
+    opacity: 0.5;
+    flex-shrink: 0;
+}
+
+.error-context-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 /* ── Error footer ──────────────────────────────────────────────── */
 
@@ -830,8 +1466,7 @@ html, body {
 
 .error-item-container:hover .error-footer { opacity: 1; }
 
-.error-item-container.resolved { opacity: 0.6; }
-.error-item-container.resolved .severity-icon { color: var(--vscode-testing-iconPassed, #4c4); }
+
 
 .error-footer-toolbar {
     display: flex;
@@ -898,7 +1533,7 @@ html, body {
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    margin: 0 8px 8px 8px;
+    margin: 0 8px 2px 12px;
     border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.12));
     border-radius: 10px;
     background: var(--vscode-input-background, #1e1e1e);
@@ -914,8 +1549,18 @@ html, body {
 .compose-below-bar {
     display: flex;
     align-items: center;
-    gap: 0;
-    padding: 2px 8px 10px 8px;
+    gap: 4px;
+    padding: 7px 8px 6px 16px;
+}
+
+.compose-below-bar .compose-picker-btn {
+    color: #e0e0e0;
+    font-size: 10px;
+}
+
+.compose-below-bar .compose-picker-chevron {
+    font-size: 11px !important;
+    color: #e0e0e0;
 }
 
 .compose-below-bar .compose-picker-dropdown {
@@ -999,7 +1644,7 @@ html, body {
     flex: 1;
     min-height: 24px;
     max-height: 120px;
-    padding: 8px 10px;
+    padding: 11px 10px 16px;
     border: none;
     background: transparent;
     color: var(--vscode-input-foreground, #ccc);
@@ -1029,6 +1674,8 @@ html, body {
     padding: 0;
     opacity: 0.9;
     transition: opacity 0.15s;
+    margin-right: -3px;
+    margin-top: -1px;
 }
 
 .compose-send-btn:hover {
@@ -1053,7 +1700,7 @@ html, body {
 .compose-toolbar-left {
     display: flex;
     align-items: center;
-    gap: 0;
+    gap: 4px;
 }
 
 .compose-toolbar-right {
@@ -1077,6 +1724,7 @@ html, body {
     border-radius: 4px;
     padding: 0;
     opacity: 0.7;
+    margin-left: -2px;
 }
 
 .compose-attach-btn:hover {
@@ -1099,9 +1747,9 @@ html, body {
     padding: 2px 6px;
     border: none;
     background: transparent;
-    color: var(--vscode-foreground);
+    color: #e0e0e0;
     font-family: inherit;
-    font-size: 12px;
+    font-size: 11px;
     cursor: pointer;
     border-radius: 4px;
     white-space: nowrap;
@@ -1117,7 +1765,8 @@ html, body {
 
 .compose-picker-chevron {
     font-size: 9px !important;
-    opacity: 0.5;
+    opacity: 0.7;
+    color: #e0e0e0;
 }
 
 .compose-picker-label {
@@ -1136,6 +1785,7 @@ html, body {
     min-width: 240px;
     max-height: 340px;
     overflow-y: auto;
+    scrollbar-width: none;
     background: var(--vscode-menu-background, #1f1f1f);
     border: 1px solid var(--vscode-menu-border, rgba(255,255,255,0.12));
     border-radius: 8px;
@@ -1144,15 +1794,17 @@ html, body {
     z-index: 200;
 }
 
+.compose-picker-dropdown::-webkit-scrollbar { display: none; }
+
 .compose-picker-dropdown.open { display: block; }
 
 .compose-picker-section {
-    padding: 6px 10px 3px;
-    font-size: 11px;
-    font-weight: 600;
+    padding: 4px 10px 8px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: normal;
     color: var(--vscode-descriptionForeground);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--vscode-menu-separatorBackground, rgba(255,255,255,0.08));
 }
 
 .compose-picker-option {
@@ -1171,7 +1823,7 @@ html, body {
 }
 
 .compose-picker-option.active {
-    background: var(--vscode-list-activeSelectionBackground, rgba(255,255,255,0.08));
+    background: #2a2d2e;
 }
 
 .compose-picker-option > .codicon {
@@ -1198,6 +1850,12 @@ html, body {
     height: 1px;
     background: var(--vscode-menu-separatorBackground, rgba(255,255,255,0.08));
     margin: 4px 0;
+}
+
+.compose-picker-icon-spacer {
+    display: inline-block;
+    width: 14px;
+    flex-shrink: 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════

@@ -3,7 +3,6 @@ import { ErrorQueue } from './ErrorQueue';
 import { WatcherManager } from './WatcherManager';
 import { CopilotBridge } from './CopilotBridge';
 import { ErrorPilotViewProvider } from './ErrorPilotViewProvider';
-import { DEFAULT_WATCHERS } from './types';
 
 let errorQueue: ErrorQueue;
 let watcherManager: WatcherManager;
@@ -15,20 +14,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     copilotBridge = new CopilotBridge(errorQueue);
     copilotBridge.setupAutoTrigger();
 
-    // Auto-setup default watchers on first run (or if all were removed)
+    // Auto-discover watchers on first run (or if all were removed)
     if (watcherManager.getConfigs().length === 0) {
-        for (const preset of DEFAULT_WATCHERS) {
-            await watcherManager.addWatcher({
-                id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-                ...preset,
-            });
-        }
+        await watcherManager.discoverAll();
     }
 
     const viewProvider = new ErrorPilotViewProvider(context.extensionUri, errorQueue, watcherManager, copilotBridge);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(ErrorPilotViewProvider.viewType, viewProvider, {
             webviewOptions: { retainContextWhenHidden: true },
+        }),
+    );
+
+    // Auto-discover new terminals as they open
+    context.subscriptions.push(
+        vscode.window.onDidOpenTerminal(terminal => {
+            watcherManager.discoverTerminal(terminal);
         }),
     );
 
@@ -122,20 +123,107 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('errorPilot.markWorking', (errorId?: string) => {
+            if (!errorId) {
+                const sent = errorQueue.getAll()
+                    .filter(e => e.status === 'sent')
+                    .sort((a, b) => (b.sentAt ?? 0) - (a.sentAt ?? 0));
+                if (sent.length > 0) { errorId = sent[0].id; }
+                else { return; }
+            }
+            const error = errorQueue.getAll().find(e => e.id === errorId);
+            if (error) { errorQueue.markWorking(error.id); }
+        }),
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('errorPilot.markAttention', (errorId?: string, reason?: string) => {
+            if (!errorId) {
+                const working = errorQueue.getAll()
+                    .filter(e => e.status === 'working' || e.status === 'sent')
+                    .sort((a, b) => (b.sentAt ?? 0) - (a.sentAt ?? 0));
+                if (working.length > 0) { errorId = working[0].id; }
+                else { return; }
+            }
+            const error = errorQueue.getAll().find(e => e.id === errorId);
+            if (error) {
+                errorQueue.markAttention(error.id);
+                if (reason) {
+                    vscode.window.showWarningMessage(`MEDIC: Attention needed — ${reason}`);
+                }
+            }
+        }),
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('errorPilot.markAgentError', (errorId?: string, reason?: string) => {
+            if (!errorId) {
+                const active = errorQueue.getAll()
+                    .filter(e => e.status === 'working' || e.status === 'sent')
+                    .sort((a, b) => (b.sentAt ?? 0) - (a.sentAt ?? 0));
+                if (active.length > 0) { errorId = active[0].id; }
+                else { return; }
+            }
+            const error = errorQueue.getAll().find(e => e.id === errorId);
+            if (error) {
+                errorQueue.markAgentError(error.id);
+                vscode.window.showErrorMessage(`MEDIC: Agent error — ${reason ?? error.message.slice(0, 60)}`);
+            }
+        }),
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('errorPilot.demoLifecycle', async () => {
+            const id = `demo-${Date.now().toString(36)}`;
+            const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+            errorQueue.push({
+                id,
+                timestamp: Date.now(),
+                source: 'demo',
+                watcherId: '__demo__',
+                message: 'TypeError: Cannot read properties of undefined (reading \'map\')',
+                raw: 'TypeError: Cannot read properties of undefined (reading \'map\')\n    at renderItems (src/components/List.tsx:42:18)',
+                file: 'src/components/List.tsx',
+                line: 42,
+                severity: 'error',
+                status: 'pending',
+            });
+            vscode.window.showInformationMessage('MEDIC Demo: pending');
+
+            await delay(2500);
+            errorQueue.markSent(id, '(demo prompt)');
+            vscode.window.showInformationMessage('MEDIC Demo: sent');
+
+            await delay(2500);
+            errorQueue.markWorking(id);
+            vscode.window.showInformationMessage('MEDIC Demo: working');
+
+            await delay(2500);
+            errorQueue.markAttention(id);
+            vscode.window.showInformationMessage('MEDIC Demo: attention');
+
+            await delay(2500);
+            errorQueue.markAgentError(id);
+            vscode.window.showInformationMessage('MEDIC Demo: error');
+
+            await delay(2500);
+            errorQueue.markResolved(id);
+            vscode.window.showInformationMessage('MEDIC Demo: resolved ✓');
+        }),
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('errorPilot.scanWorkspace', async () => {
-            const existing = watcherManager.getConfigs();
-            const existingPaths = new Set(existing.map((c) => c.path));
-            let added = 0;
-            for (const preset of DEFAULT_WATCHERS) {
-                if (existingPaths.has(preset.path)) { continue; }
-                await watcherManager.addWatcher({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...preset });
-                added++;
-            }
-            if (added > 0) {
-                vscode.window.showInformationMessage(`MEDIC: Added ${added} watcher${added > 1 ? 's' : ''} for BitingLip services.`);
-            } else {
-                vscode.window.showInformationMessage('MEDIC: All service watchers already configured.');
-            }
+            const { added, removed } = await watcherManager.discoverAll(viewProvider.getPinnedIds());
+            const parts: string[] = [];
+            if (added > 0) { parts.push(`discovered ${added}`); }
+            if (removed > 0) { parts.push(`removed ${removed} stale`); }
+            vscode.window.showInformationMessage(
+                parts.length > 0
+                    ? `MEDIC: ${parts.join(', ')} watcher${added + removed > 1 ? 's' : ''}.`
+                    : 'MEDIC: No changes — all watchers up to date.',
+            );
         }),
     );
 

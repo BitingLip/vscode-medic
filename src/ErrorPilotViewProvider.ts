@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { PanelState, ERROR_PRESETS, CHAT_MODES, CUSTOM_AGENTS, ModelInfo } from './types';
 import { ErrorQueue } from './ErrorQueue';
 import { WatcherManager } from './WatcherManager';
@@ -29,6 +31,10 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
 
     public showAddWatcher(): void {
         this.view?.webview.postMessage({ type: 'showAddWatcher' });
+    }
+
+    public getPinnedIds(): Set<string> {
+        return new Set(this.pinnedWatcherIds);
     }
 
     resolveWebviewView(
@@ -134,14 +140,16 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'addWatcher': {
-                const { name, type, path, errorPatterns } = msg.config;
+                const { name, type, path, errorPatterns, warningPatterns } = msg.config;
                 await this.watcherManager.addWatcher({
                     id: `w-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                     name,
                     type: type || 'file',
                     path,
                     errorPatterns: errorPatterns || [],
+                    warningPatterns: warningPatterns || [],
                     enabled: true,
+                    manual: true,
                 });
                 break;
             }
@@ -169,7 +177,12 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'openFile': {
-                const uri = vscode.Uri.file(msg.file);
+                const filePath = msg.file;
+                if (!fs.existsSync(filePath)) {
+                    vscode.window.showWarningMessage(`File not found: ${filePath}`);
+                    break;
+                }
+                const uri = vscode.Uri.file(filePath);
                 const line = msg.line ? msg.line - 1 : 0;
                 const doc = await vscode.workspace.openTextDocument(uri);
                 await vscode.window.showTextDocument(doc, {
@@ -191,15 +204,52 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
                 this.pinnedWatcherIds = msg.ids || [];
                 break;
 
+            case 'archiveWatcher': {
+                await this.watcherManager.updateWatcher(msg.id, { archived: !!msg.archived, enabled: false });
+                break;
+            }
+
+            case 'linkLogFile': {
+                const fileUris = await vscode.window.showOpenDialog({
+                    canSelectFiles: true,
+                    canSelectFolders: false,
+                    canSelectMany: false,
+                    filters: { 'Log files': ['log', 'txt'], 'All files': ['*'] },
+                    title: 'Select log file for this process',
+                });
+                if (fileUris && fileUris.length > 0) {
+                    const logFile = fileUris[0].fsPath;
+                    await this.watcherManager.updateWatcher(msg.id, {
+                        logFile,
+                        logFileExists: fs.existsSync(logFile),
+                    });
+                }
+                break;
+            }
+
             case 'openLogFile': {
-                const watcher = this.watcherManager.getConfigs().find((w) => w.id === msg.id);
-                if (watcher) {
-                    const uri = vscode.Uri.file(watcher.path);
+                const paths = this.watcherManager.getLogFilePaths(msg.id);
+                if (paths.length === 0) {
+                    vscode.window.showWarningMessage('No log file found for this watcher.');
+                } else if (paths.length === 1) {
                     try {
-                        const doc = await vscode.workspace.openTextDocument(uri);
+                        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(paths[0]));
                         await vscode.window.showTextDocument(doc);
                     } catch {
-                        vscode.window.showWarningMessage(`Could not open: ${watcher.path}`);
+                        vscode.window.showWarningMessage(`Could not open: ${paths[0]}`);
+                    }
+                } else {
+                    const picked = await vscode.window.showQuickPick(
+                        paths.map(p => ({ label: path.basename(p), description: p, fsPath: p })),
+                        { placeHolder: 'Select a log file to open' },
+                    );
+                    if (picked) {
+                        try {
+                            const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(picked.fsPath));
+                            await vscode.window.showTextDocument(doc);
+                        } catch {
+                            vscode.window.showWarningMessage(`Could not open: ${picked.fsPath}`);
+                        }
                     }
                 }
                 break;
@@ -219,6 +269,8 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
                 name: m.name,
                 vendor: m.vendor,
                 family: m.family,
+                version: m.version,
+                maxInputTokens: m.maxInputTokens,
             }));
             this.view?.webview.postMessage({ type: 'models', data: modelInfos });
         } catch {
@@ -259,8 +311,18 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
             <!-- Error Feed Title Bar -->
             <div class="error-feed-title" id="error-feed-title">
                 <span class="error-feed-title-label" id="feed-title-label">All Errors</span>
-                <span class="error-feed-title-count" id="feed-title-count">0 total</span>
+                <span class="error-feed-title-count" id="feed-title-count">
+                    <button class="filter-toggle active" id="feed-count-warnings" data-severity="warning" title="Toggle warnings">
+                        <span class="filter-toggle-icon"><span class="codicon codicon-warning"></span><span class="filter-toggle-slash"><span class="codicon codicon-remove-small slash-shadow"></span><span class="codicon codicon-remove-small slash-front"></span></span></span>
+                    </button>
+                    <button class="filter-toggle active" id="feed-count-errors" data-severity="error" title="Toggle errors">
+                        <span class="filter-toggle-icon"><span class="codicon codicon-error"></span><span class="filter-toggle-slash"><span class="codicon codicon-remove-small slash-shadow"></span><span class="codicon codicon-remove-small slash-front"></span></span></span>
+                    </button>
+                </span>
                 <div class="error-feed-title-actions">
+                    <button class="icon-btn" id="feed-title-delete" title="Clear all visible errors" style="display:none;">
+                        <span class="codicon codicon-trash"></span>
+                    </button>
                     <button class="icon-btn" id="feed-title-clear" data-action="clear-filter" title="Clear filter" style="display:none;">
                         <span class="codicon codicon-close"></span>
                     </button>
@@ -291,6 +353,19 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
                 </div>
             </div>
 
+            <!-- Todo List (above compose box) -->
+            <div class="todo-list" id="todo-list">
+                <div class="todo-list-header" id="todo-list-header">
+                    <span class="codicon codicon-chevron-down todo-list-chevron" id="todo-list-chevron"></span>
+                    <span class="todo-list-title" id="todo-list-title">Todos</span>
+                    <span class="todo-list-count" id="todo-list-count"></span>
+                    <span class="todo-list-collapsed-preview" id="todo-list-collapsed-preview"></span>
+                    <button class="todo-list-clear icon-btn" id="todo-list-clear" title="Clear completed todos">
+                        <span class="codicon codicon-clear-all"></span>
+                    </button>
+                </div>
+                <div class="todo-list-items" id="todo-list-items"></div>
+            </div>
             <!-- Compose Box -->
             <div class="compose-box" id="compose-box">
                 <!-- Selected Error Chips -->
@@ -394,7 +469,7 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
                         <span class="codicon codicon-search"></span>
                     </button>
                     <button class="icon-btn" id="watchers-hide-btn" title="Hide sidebar">
-                        <span class="codicon codicon-close-all"></span>
+                        <span class="codicon codicon-layout-sidebar-right"></span>
                     </button>
                 </div>
             </div>
@@ -407,7 +482,7 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
             <!-- Add Watcher button -->
             <div class="watchers-new-button-container">
                 <button class="watchers-new-button" id="watchers-new-btn">
-                    <span class="codicon codicon-add"></span> Add Watcher
+                    New Watcher
                 </button>
             </div>
 
@@ -416,6 +491,18 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
                 <div class="watchers-empty" id="watchers-empty">
                     <p>No watchers configured</p>
                 </div>
+            </div>
+
+            <!-- Global Filter Bar -->
+            <div class="watchers-filter-bar" id="watchers-filter-bar">
+                <button class="filter-toggle active" id="filter-toggle-errors" data-severity="error" title="Toggle errors">
+                    <span class="filter-toggle-icon"><span class="codicon codicon-error"></span><span class="filter-toggle-slash"><span class="codicon codicon-remove-small slash-shadow"></span><span class="codicon codicon-remove-small slash-front"></span></span></span>
+                    <span class="filter-toggle-count" id="filter-count-errors">0</span>
+                </button>
+                <button class="filter-toggle active" id="filter-toggle-warnings" data-severity="warning" title="Toggle warnings">
+                    <span class="filter-toggle-icon"><span class="codicon codicon-warning"></span><span class="filter-toggle-slash"><span class="codicon codicon-remove-small slash-shadow"></span><span class="codicon codicon-remove-small slash-front"></span></span></span>
+                    <span class="filter-toggle-count" id="filter-count-warnings">0</span>
+                </button>
             </div>
         </div>
     </div>

@@ -1,4 +1,4 @@
-﻿// @ts-check
+// @ts-check
 /// <reference lib="dom" />
 
 (function () {
@@ -25,9 +25,16 @@
     let collapsedSections = new Set();
     /** @type {Set<string>} */
     let pinnedWatcherIds = new Set();
+    // Severity filter state (global = watcher sidebar, local = error feed header)
+    let globalFilterErrors = true;
+    let globalFilterWarnings = true;
+    let localFilterErrors = true;
+    let localFilterWarnings = true;
     let sidebarHidden = false;
     let sashDragging = false;
     let sidebarWidth = 220;
+    /** @type {Set<string>} group keys that are expanded to show member processes */
+    let expandedGroups = new Set();
 
     // ── Compose state ──
     /** @type {Set<string>} */
@@ -42,6 +49,36 @@
     let customAgents = [];
     /** @type {Array<{id: string, name: string, vendor: string, family: string}>} */
     let availableModels = [];
+
+    /* ── Status Config (single source of truth) ── */
+    const STATUS = {
+        todo: {
+            warning:  { icon: 'codicon-warning',        cls: 'status-warning' },
+            error:    { icon: 'codicon-error',           cls: 'status-error' },
+            sent:     { icon: 'codicon-arrow-circle-up', cls: 'status-sent' },
+            working:  { icon: 'codicon-copilot',         cls: 'status-working' },
+            attention:{ icon: 'codicon-copilot',         cls: 'status-attention' },
+            resolved: { icon: 'codicon-pass',            cls: 'status-resolved' },
+            pending:  { icon: 'codicon-circle',          cls: 'status-pending' },
+        },
+        errorFeed: {
+            warning:  { icon: 'codicon-warning',         cls: 'status-warning' },
+            error:    { icon: 'codicon-error',            cls: 'status-error' },
+            sent:     { icon: 'codicon-arrow-circle-up',  cls: 'status-sent' },
+            working:  { icon: 'codicon-copilot',          cls: 'status-working' },
+            attention:{ icon: 'codicon-copilot',          cls: 'status-attention' },
+            resolved: { icon: 'codicon-pass',             cls: 'status-resolved' },
+        },
+        watcher: {
+            paused:    { icon: 'codicon-circle-small-filled',  cls: 'status-paused' },
+            idle:      { icon: 'codicon-record-small',         cls: 'status-active' },
+            warning:   { icon: 'codicon-warning',              cls: 'status-warning' },
+            error:     { icon: 'codicon-error',                cls: 'status-error' },
+            working:   { icon: 'codicon-session-in-progress',  cls: 'status-active' },
+            connError: { icon: 'codicon-circle-slash',         cls: 'status-error' },
+        },
+    };
+
 
     /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
        DOM refs
@@ -63,6 +100,19 @@
     // Error Feed
     const $errorFeed = /** @type {HTMLElement} */ ($('error-feed'));
     const $emptyState = /** @type {HTMLElement} */ ($('empty-state'));
+
+    // Todo List
+    const $todoList = /** @type {HTMLElement} */ ($('todo-list'));
+    const $todoListHeader = /** @type {HTMLElement} */ ($('todo-list-header'));
+    const $todoListChevron = /** @type {HTMLElement} */ ($('todo-list-chevron'));
+    const $todoListTitle = /** @type {HTMLElement} */ ($('todo-list-title'));
+    const $todoListCount = /** @type {HTMLElement} */ ($('todo-list-count'));
+    const $todoListItems = /** @type {HTMLElement} */ ($('todo-list-items'));
+    const $todoListClear = /** @type {HTMLElement} */ ($('todo-list-clear'));
+    const $todoListCollapsedPreview = /** @type {HTMLElement} */ ($('todo-list-collapsed-preview'));
+    let todoCollapsed = true;
+    /** @type {Map<string, number>} resolved error id → timeout handle */
+    const resolvedTimers = new Map();
 
     // Compose Box
     const $composeBox = /** @type {HTMLElement} */ ($('compose-box'));
@@ -104,6 +154,28 @@
     const $watchersList = /** @type {HTMLElement} */ ($('watchers-list'));
     const $watchersEmpty = /** @type {HTMLElement} */ ($('watchers-empty'));
 
+    // Global filter bar (watcher sidebar bottom)
+    const $filterBar = /** @type {HTMLElement} */ ($('watchers-filter-bar'));
+    const $filterToggleErrors = /** @type {HTMLElement} */ ($('filter-toggle-errors'));
+    const $filterToggleWarnings = /** @type {HTMLElement} */ ($('filter-toggle-warnings'));
+    const $filterCountErrors = /** @type {HTMLElement} */ ($('filter-count-errors'));
+    const $filterCountWarnings = /** @type {HTMLElement} */ ($('filter-count-warnings'));
+
+    // Feed title count elements
+    const $feedCountWarnings = /** @type {HTMLElement} */ ($('feed-count-warnings'));
+    const $feedCountErrors = /** @type {HTMLElement} */ ($('feed-count-errors'));
+    const $feedTitleDelete = /** @type {HTMLElement} */ ($('feed-title-delete'));
+
+    // Error feed sections
+    const FEED_SECTIONS = [
+        { key: 'new',    label: 'New',    statuses: ['pending'] },
+        { key: 'active', label: 'Active', statuses: ['sent', 'sending', 'working', 'attention', 'error'] },
+        { key: 'solved', label: 'Solved', statuses: ['resolved'] },
+    ];
+    const feedSectionCollapsed = { new: false, active: false, solved: false };
+    /** @type {Map<string, string>} error id → section key (for move animations) */
+    let prevErrorSections = new Map();
+
     // Overlays
     const $addOverlay = /** @type {HTMLElement} */ ($('add-watcher-overlay'));
 
@@ -123,8 +195,24 @@
        Rendering
        â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
+    function renderFilterBar() {
+        // Global counts (all watchers)
+        const allWarnings = errors.filter(e => e.severity === 'warning').length;
+        const allErrors = errors.filter(e => !e.severity || e.severity === 'error').length;
+        $filterCountErrors.textContent = String(allErrors);
+        $filterCountWarnings.textContent = String(allWarnings);
+
+        // Visual toggle state
+        $filterToggleErrors.classList.toggle('active', globalFilterErrors);
+        $filterToggleErrors.classList.toggle('inactive', !globalFilterErrors);
+        $filterToggleWarnings.classList.toggle('active', globalFilterWarnings);
+        $filterToggleWarnings.classList.toggle('inactive', !globalFilterWarnings);
+    }
+
     function render() {
         renderFeedTitle();
+        renderFilterBar();
+        renderTodoList();
         renderErrors();
         renderWatchers();
         renderComposeChips();
@@ -140,8 +228,6 @@
     /* â”€â”€ Error Feed Title Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
     function renderFeedTitle() {
-        const pendingCount = errors.filter(e => e.status === 'pending').length;
-
         if (selectedWatcherId) {
             const w = watchers.find(w => w.id === selectedWatcherId);
             $feedTitleLabel.textContent = w ? w.name.toUpperCase() : 'UNKNOWN WATCHER';
@@ -151,129 +237,395 @@
             $feedTitleClear.style.display = 'none';
         }
 
-        if (pendingCount > 0) {
-            $feedTitleCount.textContent = `${pendingCount} pending`;
-            $feedTitleCount.classList.add('has-pending');
-        } else {
-            $feedTitleCount.textContent = `${errors.length} total`;
-            $feedTitleCount.classList.remove('has-pending');
+        // Local filter toggle visual state
+        $feedCountWarnings.classList.toggle('inactive', !localFilterWarnings);
+        $feedCountErrors.classList.toggle('inactive', !localFilterErrors);
+
+        // Show/hide feed-level trash icon
+        const filtered = getFilteredErrors();
+        if ($feedTitleDelete) {
+            $feedTitleDelete.style.display = filtered.length ? '' : 'none';
         }
     }
 
     /* â”€â”€ Error Feed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-    function renderErrors() {
-        const filtered = selectedWatcherId
-            ? errors.filter(e => e.watcherId === selectedWatcherId)
-            : errors;
+        /* -- Todo List ------------------------------------------------- */
 
-        // Build map of currently rendered cards
-        const existingItems = $errorFeed.querySelectorAll('.error-item-container');
-        const existingMap = new Map();
-        existingItems.forEach(el => existingMap.set(el.dataset.id, el));
+    function renderTodoList() {
+        if (!$todoList || !$todoListItems) return;
 
-        if (filtered.length === 0) {
-            existingItems.forEach(el => el.remove());
-            $emptyState.classList.add('visible');
-            return;
+        const allActive = watchers.filter(w => w.enabled !== false);
+        const relevantWatchers = selectedWatcherId
+            ? allActive.filter(w => w.id === selectedWatcherId)
+            : allActive;
+
+        /** @type {Array<{id: string, icon: string, iconClass: string, label: string}>} */
+        const items = [];
+
+        // 1. Active watcher = "Watching" row (scoped to selection)
+        if (relevantWatchers.length > 0) {
+            const label = relevantWatchers.length === 1
+                ? `Watching ${relevantWatchers[0].name}`
+                : `Watching ${relevantWatchers.length} sources`;
+            items.push({ id: '_watching', icon: STATUS.watcher.working.icon, iconClass: STATUS.watcher.working.cls, label });
         }
 
-        $emptyState.classList.remove('visible');
+        // 2. Errors by status (scoped to selection)
+        const todoFilterIds = getSelectedFilterIds();
+        const filtered = todoFilterIds.length > 0
+            ? errors.filter(e => todoFilterIds.includes(e.watcherId))
+            : errors;
 
-        // Track which ids should remain
-        const filteredIds = new Set(filtered.map(e => e.id));
+        for (const err of filtered) {
+            const short = (err.message || err.source || err.id).substring(0, 80);
 
-        // Remove cards no longer in the filtered set
-        existingItems.forEach(el => {
-            if (!filteredIds.has(el.dataset.id)) el.remove();
+            if (err.status === 'resolved') {
+                const s = STATUS.todo.resolved;
+                items.push({ id: err.id, icon: s.icon, iconClass: s.cls, label: short });
+                if (!resolvedTimers.has(err.id)) {
+                    const handle = window.setTimeout(() => {
+                        resolvedTimers.delete(err.id);
+                        renderTodoList();
+                    }, 5 * 60 * 1000);
+                    resolvedTimers.set(err.id, handle);
+                }
+            } else if (err.status === 'working') {
+                const s = STATUS.todo.working;
+                items.push({ id: err.id, icon: s.icon, iconClass: s.cls, label: short });
+            } else if (err.status === 'attention') {
+                const s = STATUS.todo.attention;
+                items.push({ id: err.id, icon: s.icon, iconClass: s.cls, label: short });
+            } else if (err.status === 'error') {
+                const s = STATUS.todo.error;
+                items.push({ id: err.id, icon: s.icon, iconClass: s.cls, label: short });
+            } else if (err.status === 'sent' || err.status === 'sending') {
+                const s = STATUS.todo.sent;
+                items.push({ id: err.id, icon: s.icon, iconClass: s.cls, label: short });
+            } else {
+                const s = err.severity === 'error' ? STATUS.todo.error : STATUS.todo.warning;
+                items.push({ id: err.id, icon: s.icon, iconClass: s.cls, label: short });
+            }
+        }
+
+        // Clean up timers for errors no longer resolved
+        const resolvedIds = new Set(filtered.filter(e => e.status === 'resolved').map(e => e.id));
+        for (const [id, handle] of resolvedTimers) {
+            if (!resolvedIds.has(id)) {
+                clearTimeout(handle);
+                resolvedTimers.delete(id);
+            }
+        }
+
+        // Filter out expired resolved items
+        const displayItems = items.filter(item => {
+            if (item.iconClass === STATUS.todo.resolved.cls && !resolvedTimers.has(item.id)) return false;
+            return true;
         });
 
-        // Insert / update cards
-        let prevNode = null;
-        for (const err of filtered) {
-            const existing = existingMap.get(err.id);
-            if (existing) {
-                // Update occurrence badge in-place
-                const badge = existing.querySelector('.error-occurrence-badge');
-                const count = err.occurrences || 1;
-                if (count > 1) {
-                    if (badge) {
-                        if (badge.textContent !== String(count)) {
-                            badge.textContent = count;
-                            badge.title = count + ' occurrences';
-                            badge.classList.remove('pulse');
-                            void badge.offsetWidth; // reflow to re-trigger
-                            badge.classList.add('pulse');
-                        }
-                    } else {
-                        // First duplicate — inject badge
-                        const span = document.createElement('span');
-                        span.className = 'error-occurrence-badge pulse';
-                        span.title = count + ' occurrences';
-                        span.textContent = count;
-                        const source = existing.querySelector('.error-source');
-                        if (source) source.after(span);
-                    }
-                }
-                // Update status classes
-                const isChip = selectedErrorIds.has(err.id);
-                existing.className = `error-item-container ${err.status}${isChip ? ' chip-selected' : ''}`;
-                // Update severity icon to reflect status
-                const sevIcon = existing.querySelector('.severity-icon');
-                if (sevIcon) {
-                    const sevClass = err.stackTrace ? 'severity-error' : 'severity-warning';
-                    const sevIconName = err.stackTrace ? 'codicon-error' : 'codicon-warning';
-                    sevIcon.className = `severity-icon ${statusIconClass(err)}`;
-                    sevIcon.innerHTML = statusIconHtml(err, sevIconName);
-                }
-                // Update inline status label
-                const inlineStatus = existing.querySelector('.error-status-inline');
-                if (err.status !== 'pending') {
-                    if (inlineStatus) {
-                        inlineStatus.className = `error-status-inline ${err.status}`;
-                        inlineStatus.textContent = statusLabel(err.status);
-                    } else {
-                        const span = document.createElement('span');
-                        span.className = `error-status-inline ${err.status}`;
-                        span.textContent = statusLabel(err.status);
-                        const ts = existing.querySelector('.error-timestamp');
-                        if (ts) ts.after(span);
-                    }
-                } else if (inlineStatus) {
-                    inlineStatus.remove();
-                }
-                prevNode = existing;
+        if (displayItems.length === 0) {
+            $todoList.classList.add('hidden');
+            return;
+        }
+        $todoList.classList.remove('hidden');
+
+        // Completion count: resolved out of total error items (exclude session item)
+        const errorItems = displayItems.filter(i => i.id !== '_watching');
+        const doneCount = errorItems.filter(i => i.iconClass === STATUS.todo.resolved.cls).length;
+        $todoListCount.textContent = doneCount > 0
+            ? `(${doneCount}/${errorItems.length})`
+            : `(${errorItems.length})`;
+
+        // Collapsed preview: show session item inline
+        const sessionItem = displayItems.find(i => i.id === '_watching');
+        if ($todoListCollapsedPreview) {
+            if (sessionItem) {
+                $todoListCollapsedPreview.innerHTML =
+                    `<span class="todo-preview-icon ${sessionItem.iconClass}"><span class="codicon ${sessionItem.icon}"></span></span>` +
+                    `<span>${esc(sessionItem.label)}</span>`;
             } else {
-                // New card — create with slide-in animation
-                const card = createErrorItem(err);
-                card.classList.add('error-new');
-                card.addEventListener('animationend', () => card.classList.remove('error-new'), { once: true });
-                if (prevNode && prevNode.nextSibling) {
-                    $errorFeed.insertBefore(card, prevNode.nextSibling);
-                } else {
-                    $errorFeed.appendChild(card);
-                }
-                // Detect real overflow after DOM insertion
-                requestAnimationFrame(() => {
-                    const content = card.querySelector('.error-code-content');
-                    const box = card.querySelector('.error-code-box');
-                    if (content && box && content.scrollHeight > content.clientHeight) {
-                        box.classList.add('overflows');
-                    }
-                });
-                prevNode = card;
+                const first = displayItems[0];
+                $todoListCollapsedPreview.innerHTML =
+                    `<span class="todo-preview-icon ${first.iconClass}"><span class="codicon ${first.icon}"></span></span>` +
+                    `<span>${esc(first.label)}</span>`;
             }
+        }
+
+        if (todoCollapsed) {
+            $todoList.classList.add('collapsed');
+        } else {
+            $todoList.classList.remove('collapsed');
+        }
+
+        $todoListItems.innerHTML = displayItems.map(item => {
+            const clickable = item.id !== '_watching' && ['sent', 'working', 'attention', 'error'].includes(
+                (errors.find(e => e.id === item.id) || {}).status || '');
+            return `
+            <div class="todo-item${clickable ? ' clickable' : ''}" data-id="${esc(item.id)}">
+                <span class="todo-item-icon ${item.iconClass}"><span class="codicon ${item.icon}"></span></span>
+                <span class="todo-item-label">${esc(item.label)}</span>
+            </div>`;
+        }).join('');
+    }
+
+    // Todo item click — open the agent session for this error
+    $todoListItems?.addEventListener('click', (e) => {
+        const target = /** @type {HTMLElement} */ (e.target);
+        const todoItem = target.closest('.todo-item.clickable');
+        if (!todoItem) return;
+        const id = todoItem.getAttribute('data-id');
+        if (id) {
+            vscode.postMessage({ type: 'openAgentSession', id });
+        }
+    });
+
+    $todoListHeader?.addEventListener('click', (e) => {
+        if (e.target.closest('.todo-list-clear')) return;
+        todoCollapsed = !todoCollapsed;
+        renderTodoList();
+    });
+
+    $todoListClear?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Clear all resolved/sent/pending errors but keep watching (session) items
+        for (const [id, handle] of resolvedTimers) {
+            clearTimeout(handle);
+        }
+        resolvedTimers.clear();
+        renderTodoList();
+    });
+
+    /** Returns filtered errors based on watcher selection + severity filters */
+    function getFilteredErrors() {
+        const filterIds = getSelectedFilterIds();
+        let filtered = filterIds.length > 0
+            ? errors.filter(e => filterIds.includes(e.watcherId))
+            : errors;
+        filtered = filtered.filter(e => {
+            const sev = e.severity || 'error';
+            if (sev === 'error' && (!globalFilterErrors || !localFilterErrors)) return false;
+            if (sev === 'warning' && (!globalFilterWarnings || !localFilterWarnings)) return false;
+            return true;
+        });
+        return filtered;
+    }
+
+    function renderErrors() {
+        const filtered = getFilteredErrors();
+
+        // ── Bucket errors into sections ──
+        /** @type {Record<string, typeof errors>} */
+        const buckets = {};
+        for (const sec of FEED_SECTIONS) buckets[sec.key] = [];
+
+        for (const err of filtered) {
+            const sec = FEED_SECTIONS.find(s => s.statuses.includes(err.status || 'pending'));
+            buckets[(sec || FEED_SECTIONS[0]).key].push(err);
+        }
+
+        // ── Remove old top-level cards (leftover from pre-section render) ──
+        $errorFeed.querySelectorAll(':scope > .error-item-container').forEach(el => el.remove());
+
+        // ── Empty state ──
+        if (filtered.length === 0) {
+            // Remove section containers
+            $errorFeed.querySelectorAll('.error-feed-section').forEach(el => el.remove());
+            $emptyState.classList.add('visible');
+            prevErrorSections.clear();
+            return;
+        }
+        $emptyState.classList.remove('visible');
+
+        // ── Build / update each section ──
+        /** @type {Map<string, string>} new map of error id → section key */
+        const newSectionMap = new Map();
+
+        for (const sec of FEED_SECTIONS) {
+            const sectionErrors = buckets[sec.key];
+
+            // Counts per severity
+            const errCount = sectionErrors.filter(e => (e.severity || 'error') === 'error').length;
+            const warnCount = sectionErrors.filter(e => e.severity === 'warning').length;
+
+            // Find or create section container
+            let $section = $errorFeed.querySelector(`.error-feed-section[data-section="${sec.key}"]`);
+            if (!$section) {
+                $section = document.createElement('div');
+                $section.className = 'error-feed-section';
+                $section.dataset.section = sec.key;
+                if (feedSectionCollapsed[sec.key]) $section.classList.add('collapsed');
+                $section.innerHTML = `
+                    <div class="error-feed-section-header" data-action="toggle-section" data-section="${sec.key}">
+                        <span class="error-feed-section-chevron"><span class="codicon codicon-chevron-down"></span></span>
+                        <span class="error-feed-section-label">${sec.label}</span>
+                        <span class="error-feed-section-counts"></span>
+                        <button class="error-feed-section-delete icon-btn" data-action="delete-section" data-section="${sec.key}" title="Clear section">
+                            <span class="codicon codicon-trash"></span>
+                        </button>
+                    </div>
+                    <div class="error-feed-section-list"></div>`;
+                $errorFeed.appendChild($section);
+            }
+
+            // Update counts
+            const $counts = $section.querySelector('.error-feed-section-counts');
+            if ($counts) {
+                let countsHtml = '';
+                if (errCount > 0)  countsHtml += `<span class="error-feed-section-count count-err"><span class="codicon codicon-error"></span> ${errCount}</span>`;
+                if (warnCount > 0) countsHtml += `<span class="error-feed-section-count count-warn"><span class="codicon codicon-warning"></span> ${warnCount}</span>`;
+                $counts.innerHTML = countsHtml;
+            }
+
+            // Hide section if empty
+            $section.style.display = sectionErrors.length === 0 ? 'none' : '';
+
+            // ── Reconcile cards inside section list ──
+            const $list = $section.querySelector('.error-feed-section-list');
+            const existingCards = $list.querySelectorAll('.error-item-container');
+            const existingMap = new Map();
+            existingCards.forEach(el => existingMap.set(el.dataset.id, el));
+
+            const wantedIds = new Set(sectionErrors.map(e => e.id));
+
+            // Remove cards no longer in this section
+            existingCards.forEach(el => {
+                if (!wantedIds.has(el.dataset.id)) el.remove();
+            });
+
+            // Insert / update cards in order
+            let prevNode = null;
+            for (const err of sectionErrors) {
+                newSectionMap.set(err.id, sec.key);
+                const existing = existingMap.get(err.id);
+                if (existing) {
+                    updateErrorCard(existing, err);
+                    // Ensure correct order
+                    if (prevNode && prevNode.nextSibling !== existing) {
+                        prevNode.after(existing);
+                    }
+                    prevNode = existing;
+                } else {
+                    const card = createErrorItem(err);
+                    // Animate: slide-in for genuinely new, fade for section-move
+                    const prevSec = prevErrorSections.get(err.id);
+                    if (prevSec && prevSec !== sec.key) {
+                        card.classList.add('error-new');
+                    } else if (!prevSec) {
+                        card.classList.add('error-new');
+                    }
+                    card.addEventListener('animationend', () => card.classList.remove('error-new'), { once: true });
+
+                    if (prevNode && prevNode.nextSibling) {
+                        $list.insertBefore(card, prevNode.nextSibling);
+                    } else if (prevNode) {
+                        prevNode.after(card);
+                    } else {
+                        $list.prepend(card);
+                    }
+
+                    // Detect real overflow after DOM insertion
+                    requestAnimationFrame(() => {
+                        const content = card.querySelector('.error-code-content');
+                        const box = card.querySelector('.error-code-box');
+                        if (content && box && content.scrollHeight > content.clientHeight) {
+                            box.classList.add('overflows');
+                        }
+                    });
+                    prevNode = card;
+                }
+            }
+        }
+
+        // Remove sections that no longer exist in config (safety)
+        $errorFeed.querySelectorAll('.error-feed-section').forEach(el => {
+            if (!FEED_SECTIONS.some(s => s.key === el.dataset.section)) el.remove();
+        });
+
+        prevErrorSections = newSectionMap;
+    }
+
+    /** Update an existing error card in-place */
+    function updateErrorCard(card, err) {
+        const isChip = selectedErrorIds.has(err.id);
+        card.className = `error-item-container ${err.status}${isChip ? ' chip-selected' : ''}`;
+
+        // Update the .error-code-type sidebar (severity icon + count)
+        const typeEl = card.querySelector('.error-code-type');
+        if (typeEl) {
+            const sevClass = err.severity === 'error' ? 'severity-error' : 'severity-warning';
+            typeEl.className = `error-code-type ${sevClass} ${statusIconClass(err)}`;
+            const iconSpan = typeEl.querySelector('.codicon');
+            if (iconSpan) {
+                const newIcon = statusIconForType(err);
+                iconSpan.className = `codicon ${newIcon}`;
+            }
+        }
+
+        // Update occurrence count
+        const countEl = card.querySelector('.error-code-type-count');
+        if (countEl) {
+            const count = err.occurrences || 1;
+            if (count > 1) {
+                if (countEl.textContent !== String(count)) {
+                    countEl.textContent = count;
+                    countEl.classList.remove('pulse');
+                    void countEl.offsetWidth;
+                    countEl.classList.add('pulse');
+                }
+                countEl.style.display = '';
+            } else {
+                countEl.style.display = 'none';
+            }
+        }
+
+        // Update .error-source status class
+        const source = card.querySelector('.error-source');
+        if (source) {
+            source.className = source.className.replace(/\bstatus-\S+/g, '');
+            source.classList.add('error-source', statusIconClass(err));
+        }
+
+        // Update inline status label
+        const inlineStatus = card.querySelector('.error-status-inline');
+        if (err.status !== 'pending') {
+            if (inlineStatus) {
+                inlineStatus.className = `error-status-inline ${err.status}`;
+                inlineStatus.textContent = statusLabel(err.status);
+            } else {
+                const span = document.createElement('span');
+                span.className = `error-status-inline ${err.status}`;
+                span.textContent = statusLabel(err.status);
+                const ts = card.querySelector('.error-timestamp');
+                if (ts) ts.after(span);
+            }
+        } else if (inlineStatus) {
+            inlineStatus.remove();
         }
     }
 
-    /** Returns the CSS class for the severity-icon div based on error status */
+    /** Returns the CSS class for the type sidebar based on error status */
     function statusIconClass(err) {
         switch (err.status) {
-            case 'sending': return 'status-sending';
-            case 'sent':    return 'status-sent';
-            case 'resolved': return 'status-resolved';
+            case 'sending': return STATUS.errorFeed.sent.cls;
+            case 'sent':    return STATUS.errorFeed.sent.cls;
+            case 'working': return STATUS.errorFeed.working.cls;
+            case 'attention': return STATUS.errorFeed.attention.cls;
+            case 'resolved': return STATUS.errorFeed.resolved.cls;
             default:
-                return err.stackTrace ? 'severity-error' : 'severity-warning';
+                return err.severity === 'error' ? STATUS.errorFeed.error.cls : STATUS.errorFeed.warning.cls;
+        }
+    }
+
+    /** Returns the codicon name for the type sidebar */
+    function statusIconForType(err) {
+        switch (err.status) {
+            case 'sending': return 'codicon-loading codicon-modifier-spin';
+            case 'sent':    return STATUS.errorFeed.sent.icon;
+            case 'working': return STATUS.errorFeed.working.icon;
+            case 'attention': return STATUS.errorFeed.attention.icon;
+            case 'resolved': return STATUS.errorFeed.resolved.icon;
+            default:
+                return err.severity === 'error' ? 'codicon-error' : 'codicon-warning';
         }
     }
 
@@ -281,8 +633,10 @@
     function statusIconHtml(err, fallbackIcon) {
         switch (err.status) {
             case 'sending': return '<span class="codicon codicon-loading codicon-modifier-spin"></span>';
-            case 'sent':    return '<span class="codicon codicon-arrow-right"></span>';
-            case 'resolved': return '<span class="codicon codicon-pass-filled"></span>';
+            case 'sent':    return `<span class="codicon ${STATUS.errorFeed.sent.icon}"></span>`;
+            case 'working': return `<span class="codicon ${STATUS.errorFeed.working.icon}"></span>`;
+            case 'attention': return `<span class="codicon ${STATUS.errorFeed.attention.icon}"></span>`;
+            case 'resolved': return `<span class="codicon ${STATUS.errorFeed.resolved.icon}"></span>`;
             default:        return `<span class="codicon ${fallbackIcon}"></span>`;
         }
     }
@@ -292,9 +646,32 @@
         switch (status) {
             case 'sending': return 'sending';
             case 'sent':    return 'sent';
+            case 'working': return 'working';
+            case 'attention': return 'attention';
+            case 'error':   return 'error';
             case 'resolved': return 'fixed';
             default:        return status;
         }
+    }
+
+    /** Delete all errors in a given section */
+    function deleteSectionErrors(sectionKey) {
+        const sec = FEED_SECTIONS.find(s => s.key === sectionKey);
+        if (!sec) return;
+        const toRemove = errors.filter(e => sec.statuses.includes(e.status || 'pending')).map(e => e.id);
+        if (toRemove.length === 0) return;
+        toRemove.forEach(id => {
+            vscode.postMessage({ type: 'dismissError', errorId: id });
+        });
+    }
+
+    /** Delete all currently visible (filtered) errors */
+    function deleteVisibleErrors() {
+        const filtered = getFilteredErrors();
+        if (filtered.length === 0) return;
+        filtered.forEach(err => {
+            vscode.postMessage({ type: 'dismissError', errorId: err.id });
+        });
     }
 
     /**
@@ -307,26 +684,22 @@
         el.className = `error-item-container ${err.status}${isChipSelected ? ' chip-selected' : ''}`;
         el.dataset.id = err.id;
 
-        const severityClass = err.stackTrace ? 'severity-error' : 'severity-warning';
-        const severityIcon = err.stackTrace ? 'codicon-error' : 'codicon-warning';
+        const severityClass = err.severity === 'error' ? 'severity-error' : 'severity-warning';
+        const severityIcon = err.severity === 'error' ? 'codicon-error' : 'codicon-warning';
         const timeStr = formatRelativeTime(err.timestamp);
         const fileLinks = extractFileRefs(err);
-
         const checkboxChecked = isChipSelected ? ' checked' : '';
-
-        // We'll detect overflow after render via DOM measurement
         const hasOverflow = err.message.split('\n').length > 6;
+        const count = err.occurrences || 1;
+        const typeIcon = statusIconForType(err);
 
         el.innerHTML = `
             <div class="error-header">
                 <button class="error-select-check${checkboxChecked}" data-action="toggle-select" data-id="${err.id}" title="Select error">
                     <span class="codicon codicon-check"></span>
                 </button>
-                <div class="severity-icon ${statusIconClass(err)}">
-                    ${statusIconHtml(err, severityIcon)}
-                </div>
-                <a class="error-source" data-action="filter-source" data-watcher-id="${err.watcherId}" title="Filter by ${esc(err.source)}">${esc(err.source)}</a>
-                ${(err.occurrences || 1) > 1 ? `<span class="error-occurrence-badge" title="${err.occurrences} occurrences">${err.occurrences}</span>` : ''}
+                <span class="error-status-icon ${statusIconClass(err)}"><span class="codicon ${statusIconForType(err)}"></span></span>
+                <a class="error-source ${statusIconClass(err)}" data-action="filter-source" data-watcher-id="${err.watcherId}" title="Filter by ${esc(err.source)}">${esc(err.source)}</a>
                 <span class="error-timestamp">${timeStr}</span>
                 ${err.status !== 'pending' ? `<span class="error-status-inline ${err.status}">${statusLabel(err.status)}</span>` : ''}
                 <div class="error-header-right">
@@ -340,11 +713,17 @@
             </div>
             <div class="error-body">
                 <div class="error-code-box${hasOverflow ? ' overflows' : ''}">
-                    <button class="error-code-copy" data-action="copy" data-id="${err.id}" title="Copy"><span class="codicon codicon-copy"></span></button>
-                    <div class="error-code-content">${esc(err.message)}</div>
-                    <button class="error-code-unfold" data-action="toggle-code-fold" data-id="${err.id}">
-                        <span class="codicon codicon-chevron-down"></span>
-                    </button>
+                    <div class="error-code-type ${severityClass} ${statusIconClass(err)}">
+                        <span class="codicon ${typeIcon}"></span>
+                        <span class="error-code-type-count" style="${count > 1 ? '' : 'display:none'}">${count}</span>
+                    </div>
+                    <div class="error-code-main">
+                        <button class="error-code-copy" data-action="copy" data-id="${err.id}" title="Copy"><span class="codicon codicon-copy"></span></button>
+                        <div class="error-code-content">${esc(err.message)}</div>
+                        <button class="error-code-unfold" data-action="toggle-code-fold" data-id="${err.id}">
+                            <span class="codicon codicon-chevron-down"></span>
+                        </button>
+                    </div>
                 </div>
                 ${err.stackTrace ? `
                 <div class="error-stack-trace collapsed">
@@ -370,6 +749,156 @@
 
     /* â”€â”€ Watchers Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
+    
+    /**
+     * Build the line-2 HTML for a process watcher showing its log state.
+     * @param {import('../src/types').WatcherConfig} w
+     * @returns {string}
+     */
+    function processLine2(w) {
+        const pidStr = w.pid ? `PID ${w.pid}` : 'not running';
+        if (!w.logFile) {
+            return `<span class="process-log-none">${pidStr} &middot; no log output</span>`;
+        }
+        const logName = w.logFile.replace(/\\/g, '/').split('/').pop() || w.logFile;
+        if (w.logFileExists) {
+            return `<span class="process-log-linked">${pidStr} &middot; ${esc(logName)}</span>`;
+        }
+        return `<span class="process-log-waiting">${pidStr} &middot; waiting for ${esc(logName)}</span>`;
+    }
+
+    /**
+     * Group process watchers by shared logFile.
+     * @param {import('../src/types').WatcherConfig[]} processWatchers
+     * @returns {{ groups: Array<{groupKey: string, logFile: string, members: import('../src/types').WatcherConfig[]}>, ungrouped: import('../src/types').WatcherConfig[] }}
+     */
+    function groupProcessesByLog(processWatchers) {
+        /** @type {Map<string, import('../src/types').WatcherConfig[]>} */
+        const byLog = new Map();
+        /** @type {import('../src/types').WatcherConfig[]} */
+        const noLog = [];
+
+        for (const w of processWatchers) {
+            if (w.logFile) {
+                const key = w.logFile.toLowerCase().replace(/\\/g, '/');
+                if (!byLog.has(key)) byLog.set(key, []);
+                byLog.get(key).push(w);
+            } else {
+                noLog.push(w);
+            }
+        }
+
+        const groups = [];
+        const ungrouped = [...noLog];
+
+        for (const [key, members] of byLog.entries()) {
+            if (members.length > 1) {
+                const logFile = members[0].logFile;
+                groups.push({ groupKey: `group:${key}`, logFile, members });
+            } else {
+                ungrouped.push(members[0]);
+            }
+        }
+
+        return { groups, ungrouped };
+    }
+
+    /**
+     * Resolve selectedWatcherId into an array of watcher IDs for error filtering.
+     * If a group key is selected, returns all member IDs.
+     * @returns {string[]}
+     */
+    function getSelectedFilterIds() {
+        if (!selectedWatcherId) return [];
+        if (selectedWatcherId.startsWith('group:')) {
+            const processWatchers = watchers.filter(w => w.type === 'process' && !w.archived);
+            const { groups } = groupProcessesByLog(processWatchers);
+            const g = groups.find(g => g.groupKey === selectedWatcherId);
+            return g ? g.members.map(m => m.id) : [];
+        }
+        return [selectedWatcherId];
+    }
+
+    /**
+     * Create a group watcher card for multiple processes sharing a log file.
+     * @param {{ groupKey: string, logFile: string, members: import('../src/types').WatcherConfig[] }} group
+     * @returns {HTMLElement}
+     */
+    function createWatcherGroupItem(group) {
+        const el = document.createElement('div');
+        const isSelected = selectedWatcherId === group.groupKey;
+        const isExpanded = expandedGroups.has(group.groupKey);
+        el.className = `watcher-item watcher-group-item${isSelected ? ' selected' : ''}`;
+        el.dataset.groupKey = group.groupKey;
+
+        const memberIds = new Set(group.members.map(m => m.id));
+        const groupErrors = errors.filter(e => memberIds.has(e.watcherId));
+        const errCount = groupErrors.filter(e => e.status === 'pending' && (e.severity === 'error' || !e.severity)).length;
+        const warnCount = groupErrors.filter(e => e.status === 'pending' && e.severity === 'warning').length;
+        const anyEnabled = group.members.some(m => m.enabled);
+
+        const logName = (group.logFile || '').replace(/\\/g, '/').split('/').pop() || 'Unknown';
+        const title = logName.replace(/\.log$/i, '').split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+        const memberNames = group.members.map(m => m.name);
+        const maxShow = 3;
+        const shown = memberNames.slice(0, maxShow).join(', ');
+        const moreCount = memberNames.length - maxShow;
+        const memberLabel = moreCount > 0 ? `${shown} +${moreCount} more` : shown;
+
+        const hasErrors = groupErrors.some(e => e.status === 'pending' && e.severity === 'error');
+        const hasWarnings = groupErrors.some(e => e.status === 'pending' && e.severity === 'warning');
+        let statusDef;
+        if (!anyEnabled) statusDef = STATUS.watcher.paused;
+        else if (hasErrors) statusDef = STATUS.watcher.error;
+        else if (hasWarnings) statusDef = STATUS.watcher.warning;
+        else statusDef = STATUS.watcher.idle;
+
+        el.innerHTML = `
+            <div class="watcher-line-1">
+                <span class="watcher-status-icon ${statusDef.cls}"><span class="codicon ${statusDef.icon}"></span></span>
+                <div class="watcher-name">${esc(title)}</div>
+                <div class="watcher-item-actions">
+                    <button class="icon-btn" data-action="toggle-group" data-group-key="${group.groupKey}" title="${anyEnabled ? 'Pause all' : 'Resume'}">
+                        <span class="codicon ${anyEnabled ? 'codicon-debug-pause' : 'codicon-play'}"></span>
+                    </button>
+                    <button class="icon-btn" data-action="expand-group" data-group-key="${group.groupKey}" title="${isExpanded ? 'Collapse' : 'Expand'}">
+                        <span class="codicon ${isExpanded ? 'codicon-chevron-up' : 'codicon-chevron-down'}"></span>
+                    </button>
+                </div>
+            </div>
+            <div class="watcher-line-2">
+                <span class="watcher-group-badge">[${group.members.length}]</span> ${esc(memberLabel)}
+            </div>
+            <div class="watcher-line-3 ${errCount === 0 && warnCount === 0 ? 'zero' : ''}">
+                ${warnCount > 0 ? '<span class="watcher-count-warn"><span class="codicon codicon-warning"></span> ' + warnCount + '</span>' : ''}
+                ${errCount > 0 ? '<span class="watcher-count-err"><span class="codicon codicon-error"></span> ' + errCount + '</span>' : ''}
+            </div>`;
+
+        if (isExpanded) {
+            const membersDiv = document.createElement('div');
+            membersDiv.className = 'watcher-group-members';
+            for (const m of group.members) {
+                const mEl = document.createElement('div');
+                mEl.className = 'watcher-group-member';
+                mEl.innerHTML = `
+                    <span class="codicon ${m.enabled ? 'codicon-circle-filled' : 'codicon-circle-outline'}"></span>
+                    <span class="watcher-group-member-name">${esc(m.name)}</span>
+                    <span class="watcher-group-member-pid">${m.pid ? 'PID ' + m.pid : ''}</span>`;
+                membersDiv.appendChild(mEl);
+            }
+            el.appendChild(membersDiv);
+        }
+
+        el.addEventListener('click', (e) => {
+            if (/** @type {HTMLElement} */ (e.target).closest('[data-action]')) return;
+            const newId = group.groupKey === selectedWatcherId ? null : group.groupKey;
+            vscode.postMessage({ type: 'selectWatcher', id: newId });
+        });
+
+        return el;
+    }
+
     function renderWatchers() {
         // Clear existing
         const existing = $watchersList.querySelectorAll('.watcher-section, .watcher-item');
@@ -391,14 +920,15 @@
         /** @type {Record<string, string>} */
         const sectionIcons = {
             'Pinned': 'codicon-pinned',
-            'Logs': 'codicon-output',
             'Processes': 'codicon-terminal',
             'Web Console': 'codicon-globe',
+            'Logs': 'codicon-output',
+            'Archived': 'codicon-archive',
         };
 
         for (const [sectionName, sectionWatchers] of sections) {
-            // Only skip empty Pinned section; always show Logs/Processes/Web
-            if (sectionWatchers.length === 0 && sectionName === 'Pinned') continue;
+            // Skip empty Pinned and Archived sections; always show Processes/Web/Logs
+            if (sectionWatchers.length === 0 && (sectionName === 'Pinned' || sectionName === 'Archived')) continue;
 
             const sectionEl = document.createElement('div');
             sectionEl.className = `watcher-section${collapsedSections.has(sectionName) ? ' collapsed' : ''}`;
@@ -408,8 +938,6 @@
 
             sectionEl.innerHTML = `
                 <div class="watcher-section-header">
-                    <span class="codicon codicon-chevron-down watcher-section-chevron"></span>
-                    <span class="codicon ${icon} watcher-section-icon"></span>
                     <span class="watcher-section-label">${esc(sectionName)}</span>
                     <span class="watcher-section-count">${sectionWatchers.length}</span>
                 </div>
@@ -422,6 +950,15 @@
                 emptyEl.className = 'watcher-section-empty';
                 emptyEl.textContent = sectionName === 'Web Console' ? 'Chrome plugin — coming soon' : 'No watchers';
                 listEl?.appendChild(emptyEl);
+            } else if (sectionName === 'Processes') {
+                // Group process watchers that share a log file
+                const { groups: pGroups, ungrouped } = groupProcessesByLog(sectionWatchers);
+                for (const g of pGroups) {
+                    listEl?.appendChild(createWatcherGroupItem(g));
+                }
+                for (const w of ungrouped) {
+                    listEl?.appendChild(createWatcherItem(w));
+                }
             } else {
                 for (const w of sectionWatchers) {
                     listEl?.appendChild(createWatcherItem(w));
@@ -442,21 +979,27 @@
         /** @type {Map<string, import('../src/types').WatcherConfig[]>} */
         const groups = new Map();
 
-        // Pinned first
-        const pinned = list.filter(w => pinnedWatcherIds.has(w.id));
+        // Pinned first (only if any)
+        const pinned = list.filter(w => pinnedWatcherIds.has(w.id) && !w.archived);
         if (pinned.length > 0) {
             groups.set('Pinned', pinned);
         }
 
-        // Always show all three sections in order
-        groups.set('Logs', []);
+        // Sections in order: Processes, Web Console, Logs
         groups.set('Processes', []);
         groups.set('Web Console', []);
+        groups.set('Logs', []);
 
-        const categorized = list.filter(w => !pinnedWatcherIds.has(w.id));
-        for (const w of categorized) {
+        const nonSpecial = list.filter(w => !pinnedWatcherIds.has(w.id) && !w.archived);
+        for (const w of nonSpecial) {
             const cat = getCategory(w);
             groups.get(cat)?.push(w);
+        }
+
+        // Archived last (only if any)
+        const archived = list.filter(w => w.archived);
+        if (archived.length > 0) {
+            groups.set('Archived', archived);
         }
 
         return Array.from(groups.entries());
@@ -484,23 +1027,30 @@
         if (!w.enabled) el.classList.add('disabled');
         el.dataset.id = w.id;
 
-        const pendingCount = errors.filter(e => e.watcherId === w.id && e.status === 'pending').length;
-        const sendingCount = errors.filter(e => e.watcherId === w.id && (e.status === 'sent' || e.status === 'sending')).length;
+        const watcherErrors = errors.filter(e => e.watcherId === w.id);
+        const pendingCount = watcherErrors.filter(e => e.status === 'pending').length;
+        const sendingCount = watcherErrors.filter(e => e.status === 'sent' || e.status === 'sending').length;
+        const hasErrors = watcherErrors.some(e => e.status === 'pending' && e.severity === 'error');
+        const hasWarnings = watcherErrors.some(e => e.status === 'pending' && e.severity === 'warning');
+        const watcherErrorsCount = watcherErrors.filter(e => e.status === 'pending' && (e.severity === 'error' || !e.severity)).length;
+        const watcherWarnings = watcherErrors.filter(e => e.status === 'pending' && e.severity === 'warning').length;
 
-        let statusClass;
+        let statusDef;
         if (!w.enabled) {
-            statusClass = 'paused';
+            statusDef = STATUS.watcher.paused;
         } else if (sendingCount > 0) {
-            statusClass = 'agent-working';
-        } else if (pendingCount > 0) {
-            statusClass = 'has-errors';
+            statusDef = STATUS.watcher.working;
+        } else if (hasErrors) {
+            statusDef = STATUS.watcher.error;
+        } else if (hasWarnings) {
+            statusDef = STATUS.watcher.warning;
         } else {
-            statusClass = 'active';
+            statusDef = STATUS.watcher.idle;
         }
 
         el.innerHTML = `
             <div class="watcher-line-1">
-                <div class="watcher-status-dot ${statusClass}"></div>
+                <span class="watcher-status-icon ${statusDef.cls}"><span class="codicon ${statusDef.icon}"></span></span>
                 <div class="watcher-name">${esc(w.name)}</div>
                 <div class="watcher-item-actions">
                     <button class="icon-btn" data-action="toggle-watcher" data-id="${w.id}" title="${w.enabled ? 'Pause' : 'Resume'}">
@@ -512,9 +1062,9 @@
                 </div>
             </div>
             <div class="watcher-line-2">
-                <div class="watcher-path">${esc(w.path)}</div>
-                <span class="watcher-error-count ${pendingCount === 0 ? 'zero' : ''}">${pendingCount} error${pendingCount !== 1 ? 's' : ''}</span>
-            </div>`;
+                <div class="watcher-path">${w.type === 'process' ? processLine2(w) : esc(w.path)}</div>
+            </div>
+            <div class="watcher-line-3 ${pendingCount === 0 ? 'zero' : ''}">${watcherWarnings > 0 ? '<span class="watcher-count-warn"><span class="codicon codicon-warning"></span> ' + watcherWarnings + '</span>' : ''}${watcherErrorsCount > 0 ? '<span class="watcher-count-err"><span class="codicon codicon-error"></span> ' + watcherErrorsCount + '</span>' : ''}</div>`;
 
         // Click to select / filter
         el.addEventListener('click', (e) => {
@@ -586,7 +1136,7 @@
                 const opt = document.createElement('div');
                 opt.className = `compose-picker-option${a.id === selectedMode ? ' active' : ''}`;
                 opt.dataset.mode = a.id;
-                opt.innerHTML = `<span class="codicon ${a.icon}"></span><span class="compose-picker-option-label">${esc(a.label)}</span><span class="compose-picker-option-meta">${esc(a.desc)}</span>`;
+                opt.innerHTML = `<span class="compose-picker-icon-spacer"></span><span class="compose-picker-option-label">${esc(a.label)}</span>`;
                 $agentPickerDropdown.appendChild(opt);
             }
         }
@@ -616,12 +1166,42 @@
             sep.className = 'compose-picker-separator';
             $modelPickerDropdown.appendChild(sep);
 
+            // Deduplicate by model name — prefer 'copilot' vendor when names collide
+            const deduped = new Map();
             for (const m of availableModels) {
-                const opt = document.createElement('div');
-                opt.className = `compose-picker-option${m.id === selectedModel ? ' active' : ''}`;
-                opt.dataset.model = m.id;
-                opt.innerHTML = `<span class="compose-picker-option-label">${esc(m.name)}</span>`;
-                $modelPickerDropdown.appendChild(opt);
+                const key = m.name.toLowerCase();
+                const existing = deduped.get(key);
+                if (!existing || m.vendor === 'copilot') {
+                    deduped.set(key, m);
+                }
+            }
+            const uniqueModels = [...deduped.values()];
+
+            // Group by vendor
+            const grouped = {};
+            for (const m of uniqueModels) {
+                const v = m.vendor || 'Other';
+                if (!grouped[v]) grouped[v] = [];
+                grouped[v].push(m);
+            }
+
+            for (const [vendor, models] of Object.entries(grouped)) {
+                const section = document.createElement('div');
+                section.className = 'compose-picker-section';
+                section.textContent = vendor;
+                $modelPickerDropdown.appendChild(section);
+
+                for (const m of models) {
+                    const opt = document.createElement('div');
+                    opt.className = `compose-picker-option${m.id === selectedModel ? ' active' : ''}`;
+                    opt.dataset.model = m.id;
+                    const ctx = m.maxInputTokens ? formatTokenCount(m.maxInputTokens) : '';
+                    const vendorMeta = m.vendor ? `<span class="compose-picker-option-meta">${esc(m.vendor)}</span>` : '';
+                    opt.innerHTML = `<span class="compose-picker-option-label">${esc(m.name)}</span>`
+                        + (ctx ? `<span class="compose-picker-option-meta">${ctx}</span>` : '')
+                        + vendorMeta;
+                    $modelPickerDropdown.appendChild(opt);
+                }
             }
         }
 
@@ -779,6 +1359,7 @@
      */
     function showContextMenu(x, y, w) {
         const isPinned = pinnedWatcherIds.has(w.id);
+        const isArchived = !!w.archived;
 
         $contextMenu.innerHTML = `
             <div class="context-menu-item" data-ctx-action="toggle" data-id="${w.id}">
@@ -789,11 +1370,19 @@
                 <span class="codicon ${isPinned ? 'codicon-pinned' : 'codicon-pin'}"></span>
                 ${isPinned ? 'Unpin' : 'Pin'}
             </div>
-            <div class="context-menu-separator"></div>
-            <div class="context-menu-item" data-ctx-action="open-log" data-id="${w.id}">
-                <span class="codicon codicon-file-code"></span>
-                Open Log File
+            <div class="context-menu-item" data-ctx-action="archive" data-id="${w.id}">
+                <span class="codicon codicon-archive"></span>
+                ${isArchived ? 'Unarchive' : 'Archive'}
             </div>
+            <div class="context-menu-separator"></div>
+            ${w.type !== 'web' ? `<div class="context-menu-item" data-ctx-action="open-log" data-id="${w.id}">
+                <span class="codicon codicon-file-code"></span>
+                ${w.type === 'process' ? 'Open Log Files' : 'Open Log File'}
+            </div>` : ''}
+            ${w.type === 'process' && !w.logFile ? `<div class="context-menu-item" data-ctx-action="link-log" data-id="${w.id}">
+                <span class="codicon codicon-file-symlink-file"></span>
+                Link Log File
+            </div>` : ''}
             <div class="context-menu-separator"></div>
             <div class="context-menu-item" data-ctx-action="remove" data-id="${w.id}">
                 <span class="codicon codicon-trash"></span>
@@ -835,6 +1424,15 @@
             case 'open-log':
                 vscode.postMessage({ type: 'openLogFile', id });
                 break;
+            case 'link-log':
+                vscode.postMessage({ type: 'linkLogFile', id });
+                break;
+            case 'archive': {
+                const w = watchers.find(w => w.id === id);
+                const newArchived = !(w && w.archived);
+                vscode.postMessage({ type: 'archiveWatcher', id, archived: newArchived });
+                break;
+            }
             case 'remove':
                 vscode.postMessage({ type: 'removeWatcher', id });
                 break;
@@ -864,6 +1462,29 @@
 
     $errorFeed.addEventListener('click', (e) => {
         const target = /** @type {HTMLElement} */ (e.target);
+
+        // ── Section header: collapse toggle ──
+        const sectionHeader = target.closest('.error-feed-section-header');
+        if (sectionHeader) {
+            const action = sectionHeader.getAttribute('data-action');
+            const sectionKey = sectionHeader.getAttribute('data-section');
+
+            // Delete button inside section header
+            const deleteBtn = target.closest('.error-feed-section-delete');
+            if (deleteBtn) {
+                e.stopPropagation();
+                deleteSectionErrors(deleteBtn.getAttribute('data-section'));
+                return;
+            }
+
+            // Toggle collapse
+            if (action === 'toggle-section' && sectionKey) {
+                feedSectionCollapsed[sectionKey] = !feedSectionCollapsed[sectionKey];
+                const $section = sectionHeader.closest('.error-feed-section');
+                if ($section) $section.classList.toggle('collapsed', feedSectionCollapsed[sectionKey]);
+            }
+            return;
+        }
 
         // Stack trace toggle
         const stackToggle = target.closest('.stack-toggle');
@@ -975,15 +1596,40 @@
         if (!btn) return;
         const action = btn.getAttribute('data-action');
         const id = btn.getAttribute('data-id');
-        if (!id) return;
+        const groupKey = btn.getAttribute('data-group-key');
 
         switch (action) {
             case 'toggle-watcher':
-                vscode.postMessage({ type: 'toggleWatcher', id });
+                if (id) vscode.postMessage({ type: 'toggleWatcher', id });
                 break;
             case 'remove-watcher':
-                vscode.postMessage({ type: 'removeWatcher', id });
+                if (id) vscode.postMessage({ type: 'removeWatcher', id });
                 break;
+            case 'toggle-group': {
+                if (!groupKey) break;
+                const processWatchers = watchers.filter(w => w.type === 'process' && !w.archived);
+                const { groups } = groupProcessesByLog(processWatchers);
+                const g = groups.find(g => g.groupKey === groupKey);
+                if (g) {
+                    const anyEnabled = g.members.some(m => m.enabled);
+                    for (const m of g.members) {
+                        if (anyEnabled === m.enabled) {
+                            vscode.postMessage({ type: 'toggleWatcher', id: m.id });
+                        }
+                    }
+                }
+                break;
+            }
+            case 'expand-group': {
+                if (!groupKey) break;
+                if (expandedGroups.has(groupKey)) {
+                    expandedGroups.delete(groupKey);
+                } else {
+                    expandedGroups.add(groupKey);
+                }
+                renderWatchers();
+                break;
+            }
         }
     });
 
@@ -1012,6 +1658,17 @@
         $contextMenu.style.top = e.clientY + 'px';
         $contextMenu.classList.add('visible');
     });
+
+    // Sidebar deselect — clicking empty space deselects current watcher
+    $watchersList.addEventListener('click', (e) => {
+        const target = /** @type {HTMLElement} */ (e.target);
+        // Only deselect if the click target is the list container itself (empty space)
+        if (target === $watchersList || target.classList.contains('watcher-section-body')) {
+            if (selectedWatcherId) {
+                vscode.postMessage({ type: 'selectWatcher', id: null });
+            }
+        }
+    }, true);
 
     // Toolbar: refresh
     $('watchers-refresh-btn')?.addEventListener('click', () => {
@@ -1080,6 +1737,11 @@
     $feedTitleClear?.addEventListener('click', (e) => {
         e.stopPropagation();
         vscode.postMessage({ type: 'selectWatcher', id: null });
+    });
+
+    $feedTitleDelete?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteVisibleErrors();
     });
 
     /* ── Compose Box Event Handlers ──────────────────────────────── */
@@ -1377,6 +2039,33 @@
        Message Handling (from extension)
        â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
+
+    // ── Global filter bar toggles (watcher sidebar) ──
+    $filterToggleErrors?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        globalFilterErrors = !globalFilterErrors;
+        localFilterErrors = globalFilterErrors;
+        render();
+    });
+    $filterToggleWarnings?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        globalFilterWarnings = !globalFilterWarnings;
+        localFilterWarnings = globalFilterWarnings;
+        render();
+    });
+
+    // ── Local filter toggles (error feed header) ──
+    $feedCountWarnings?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        localFilterWarnings = !localFilterWarnings;
+        render();
+    });
+    $feedCountErrors?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        localFilterErrors = !localFilterErrors;
+        render();
+    });
+
     window.addEventListener('message', (event) => {
         const msg = event.data;
         switch (msg.type) {
@@ -1471,6 +2160,17 @@
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
+    }
+
+    /**
+     * Format token count to human-readable string (e.g. 128000 → "128k")
+     * @param {number} tokens
+     * @returns {string}
+     */
+    function formatTokenCount(tokens) {
+        if (tokens >= 1000000) return (tokens / 1000000).toFixed(tokens % 1000000 === 0 ? 0 : 1) + 'M';
+        if (tokens >= 1000) return (tokens / 1000).toFixed(tokens % 1000 === 0 ? 0 : 1) + 'k';
+        return String(tokens);
     }
 
     /**
