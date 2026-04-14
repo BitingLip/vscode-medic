@@ -168,7 +168,7 @@ export class WatcherManager implements vscode.Disposable {
         }
 
         // 3. Discover running OS processes that reference the workspace
-        const processAdded = await this.discoverOsProcesses(protectedIds);
+        const { added: processAdded, pidInfo } = await this.discoverOsProcesses(protectedIds);
         added += processAdded;
 
         // 4. Deduplicate: remove file watchers whose path is claimed by a process watcher
@@ -208,12 +208,12 @@ export class WatcherManager implements vscode.Disposable {
                     toRemove.push(config.id);
                 }
             } else if (config.type === 'process') {
-                // Check if any terminal matches the process pattern
-                const pattern = config.path.replace(/\*/g, '.*');
-                const regex = new RegExp(pattern, 'i');
-                const hasMatch = vscode.window.terminals.some(t => regex.test(t.name));
-                if (!hasMatch) {
-                    toRemove.push(config.id);
+                // Check if the process is still running by PID
+                if (config.pid) {
+                    const stillRunning = pidInfo.has(config.pid);
+                    if (!stillRunning) {
+                        toRemove.push(config.id);
+                    }
                 }
             }
         }
@@ -324,7 +324,8 @@ export class WatcherManager implements vscode.Disposable {
 
         try {
             const psScript = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ForEach-Object { "$($_.ProcessId)|$($_.ParentProcessId)|$($_.Name)|$($_.CommandLine)" }`;
-            const raw = execSync(`powershell -NoProfile -Command "${psScript.replace(/"/g, '\"')}"`, {
+            const encodedCmd = Buffer.from(psScript, 'utf16le').toString('base64');
+            const raw = execSync(`powershell -NoProfile -EncodedCommand ${encodedCmd}`, {
                 encoding: 'utf-8',
                 timeout: 15000,
                 windowsHide: true,
@@ -373,11 +374,11 @@ export class WatcherManager implements vscode.Disposable {
      * Dynamic scanning — no hardcoded service list. Extracts log file paths
      * by walking the parent process chain to find Tee-Object / redirect targets.
      */
-    async discoverOsProcesses(protectedIds?: Set<string>): Promise<number> {
-        if (process.platform !== 'win32') { return 0; } // TODO: Linux/Mac support
+    async discoverOsProcesses(protectedIds?: Set<string>): Promise<{ added: number; pidInfo: Map<number, { parentPid: number; cmd: string }> }> {
+        if (process.platform !== 'win32') { return { added: 0, pidInfo: new Map() }; } // TODO: Linux/Mac support
 
         const { procs, pidInfo } = this.scanOsProcesses();
-        if (procs.length === 0) { return 0; }
+        if (procs.length === 0) { return { added: 0, pidInfo }; }
 
         const existingPids = new Set(
             this.configs.filter(c => c.type === 'process' && c.pid).map(c => c.pid!)
@@ -437,7 +438,34 @@ export class WatcherManager implements vscode.Disposable {
             }
         }
 
-        return added;
+        // Second pass: inherit log file from ancestor processes that already have one.
+        // This handles deep process trees (e.g., proxy services under a supervisor)
+        // where the Tee-Object is too many hops away for direct extraction.
+        const pidToLogFile = new Map<number, string>();
+        for (const c of this.configs) {
+            if (c.type === 'process' && c.pid && c.logFile) {
+                pidToLogFile.set(c.pid, c.logFile);
+            }
+        }
+        if (pidToLogFile.size > 0) {
+            for (const c of this.configs) {
+                if (c.type !== 'process' || !c.pid || c.logFile) { continue; }
+                // Walk up parent chain looking for a PID that already has a resolved logFile
+                let currentPid: number | undefined = pidInfo.get(c.pid)?.parentPid;
+                for (let i = 0; i < 10 && currentPid !== undefined; i++) {
+                    const ancestorLog = pidToLogFile.get(currentPid);
+                    if (ancestorLog) {
+                        c.logFile = ancestorLog;
+                        c.logFileExists = fs.existsSync(ancestorLog);
+                        this.output.appendLine(`[Process Discovery] Inherited log '${path.basename(ancestorLog)}' for ${c.name} (PID ${c.pid}) from ancestor PID ${currentPid}`);
+                        break;
+                    }
+                    currentPid = pidInfo.get(currentPid)?.parentPid;
+                }
+            }
+        }
+
+        return { added, pidInfo };
     }
 
     async addWatcher(config: WatcherConfig): Promise<void> {
