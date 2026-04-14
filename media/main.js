@@ -231,10 +231,10 @@
         if (selectedWatcherId) {
             const w = watchers.find(w => w.id === selectedWatcherId);
             $feedTitleLabel.textContent = w ? w.name.toUpperCase() : 'UNKNOWN WATCHER';
-            $feedTitleClear.style.display = '';
+            if ($feedTitleClear) $feedTitleClear.style.display = '';
         } else {
             $feedTitleLabel.textContent = 'ALL ERRORS';
-            $feedTitleClear.style.display = 'none';
+            if ($feedTitleClear) $feedTitleClear.style.display = 'none';
         }
 
         // Local filter toggle visual state

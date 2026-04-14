@@ -334,6 +334,9 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
 
             <!-- Error Feed Title Bar -->
             <div class="error-feed-title" id="error-feed-title">
+                <button class="icon-btn" id="feed-title-clear" title="Clear watcher selection" style="display:none;">
+                    <span class="codicon codicon-close"></span>
+                </button>
                 <span class="error-feed-title-label" id="feed-title-label">All Errors</span>
                 <span class="error-feed-title-count" id="feed-title-count">
                     <button class="filter-toggle active" id="feed-count-warnings" data-severity="warning" title="Toggle warnings">

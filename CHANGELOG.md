@@ -2,6 +2,12 @@
 
 All notable changes to the **MEDIC** extension will be documented in this file.
 
+## [1.0.1] — 2026-04-14
+
+### Fixed
+- **Watchers not rendering on startup** — Missing `feed-title-clear` DOM element caused `renderFeedTitle()` to throw, crashing the entire `render()` pipeline before `renderWatchers()` could run
+- Added null-guards for `$feedTitleClear` style access
+
 ## [1.0.0] — 2026-04-14
 
 ### Added
