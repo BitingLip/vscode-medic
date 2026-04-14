@@ -256,8 +256,49 @@ export class WatcherManager implements vscode.Disposable {
     private static readonly IGNORED_EXES = new Set([
         'powershell.exe', 'pwsh.exe', 'cmd.exe', 'bash', 'sh', 'zsh',
         'conhost.exe', 'wsl.exe', 'explorer.exe', 'code.exe', 'code-insiders.exe',
-        'dotnet.exe', 'node.exe', 'npm.cmd', 'npx.cmd', 'git.exe',
+        'dotnet.exe', 'npm.cmd', 'npx.cmd', 'git.exe',
     ]);
+
+    /**
+     * Derive a human-readable name from a process entry.
+     * For node.exe: extracts the JS script basename (e.g., "vite.js" → "vite js (node)").
+     * For esbuild.exe: extracts short path context.
+     * For BitingLip.* .NET exes: "cloud gateway exe (BitingLip.Cloud.Gateway)".
+     * For other exes: camelCase split, strip "Service" suffix.
+     */
+    private static deriveName(proc: { name: string; cmd: string }): string {
+        const exeName = proc.name.toLowerCase();
+
+        // node.exe → extract JS file from args: "vite js (node)"
+        if (exeName === 'node.exe') {
+            const jsMatch = /node["']?\s+["']?(?:[^\s"']*[\\/])?([^\s"'\\/]+\.(?:js|mjs|cjs))["']?/i.exec(proc.cmd);
+            if (jsMatch) {
+                return jsMatch[1].replace(/\./g, ' ').trim() + ' (node)';
+            }
+            return 'node';
+        }
+
+        // esbuild.exe → "esbuild exe" with short path hint
+        if (exeName === 'esbuild.exe') {
+            return 'esbuild exe';
+        }
+
+        const rawName = proc.name.replace(/\.exe$/i, '');
+
+        // BitingLip.Cloud.Gateway → "cloud gateway exe (BitingLip.Cloud.Gateway)"
+        const dotParts = rawName.split('.');
+        if (dotParts.length >= 2 && dotParts[0].toLowerCase() === 'bitinglip') {
+            const shortName = dotParts.slice(1).join(' ').toLowerCase();
+            return `${shortName} exe (${rawName})`;
+        }
+
+        // GeminiProxyService → "Gemini Proxy"
+        return rawName
+            .replace(/([a-z])([A-Z])/g, '$1 $2')
+            .replace(/[._-]/g, ' ')
+            .replace(/Service$/i, '')
+            .trim();
+    }
 
     /**
      * Extract a log file path from a process command line.
@@ -292,7 +333,7 @@ export class WatcherManager implements vscode.Disposable {
         cmd: string,
         parentPid: number | undefined,
         pidInfo: Map<number, { parentPid: number; cmd: string }>,
-        maxDepth = 3,
+        maxDepth = 5,
     ): string | null {
         // Try the process itself
         const direct = WatcherManager.extractLogFilePath(cmd);
@@ -390,13 +431,8 @@ export class WatcherManager implements vscode.Disposable {
             // Skip if PID already tracked
             if (existingPids.has(proc.pid)) { continue; }
 
-            // Derive a readable name from the exe (strip .exe, PascalCase split)
             const rawName = proc.name.replace(/\.exe$/i, '');
-            const name = rawName
-                .replace(/([a-z])([A-Z])/g, '$1 $2') // PascalCase -> words
-                .replace(/[._-]/g, ' ')
-                .replace(/Service$/i, '')
-                .trim();
+            const name = WatcherManager.deriveName(proc);
 
             // Resolve log file via parent chain
             const logFile = WatcherManager.resolveLogFile(proc.cmd, proc.parentPid, pidInfo);

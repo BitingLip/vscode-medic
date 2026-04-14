@@ -735,12 +735,12 @@
                 </div>` : ''}
                 ${fileLinks.length > 0 ? `
                 <div class="error-context">
-                    ${fileLinks.map(f => `
-                        <a class="error-context-file" data-file="${esc(f.file)}" data-line="${f.line || ''}">
-                            <span class="codicon codicon-file-code"></span>
-                            ${esc(f.file)}${f.line ? ':' + f.line : ''}
-                        </a>
-                    `).join('')}
+                    ${fileLinks.map(f => {
+                        const basename = f.file.replace(/^.*[\\/]/, '');
+                        return `<a class="error-context-file" data-file="${esc(f.file)}" data-line="${f.line || ''}" title="${esc(f.file)}${f.line ? ':' + f.line : ''}">
+                            ${f.line ? `<span class="error-context-line-col">${f.line}</span>` : ''}<span class="error-context-name"><span class="codicon codicon-file-code"></span><span class="error-context-path">${esc(basename)}</span></span>
+                        </a>`;
+                    }).join('')}
                 </div>` : ''}
             </div>`;
 
@@ -840,11 +840,7 @@
         const logName = (group.logFile || '').replace(/\\/g, '/').split('/').pop() || 'Unknown';
         const title = logName.replace(/\.log$/i, '').split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
-        const memberNames = group.members.map(m => m.name);
-        const maxShow = 3;
-        const shown = memberNames.slice(0, maxShow).join(', ');
-        const moreCount = memberNames.length - maxShow;
-        const memberLabel = moreCount > 0 ? `${shown} +${moreCount} more` : shown;
+        const memberLabel = group.members.map(m => m.name).join(', ');
 
         const hasErrors = groupErrors.some(e => e.status === 'pending' && e.severity === 'error');
         const hasWarnings = groupErrors.some(e => e.status === 'pending' && e.severity === 'warning');
@@ -868,7 +864,7 @@
                 </div>
             </div>
             <div class="watcher-line-2">
-                <span class="watcher-group-badge">[${group.members.length}]</span> ${esc(memberLabel)}
+                <span class="watcher-group-badge">${group.members.length}</span> ${esc(memberLabel)}
             </div>
             <div class="watcher-line-3 ${errCount === 0 && warnCount === 0 ? 'zero' : ''}">
                 ${warnCount > 0 ? '<span class="watcher-count-warn"><span class="codicon codicon-warning"></span> ' + warnCount + '</span>' : ''}
@@ -921,6 +917,7 @@
         const sectionIcons = {
             'Pinned': 'codicon-pinned',
             'Processes': 'codicon-terminal',
+            'Terminals': 'codicon-terminal-cmd',
             'Web Console': 'codicon-globe',
             'Logs': 'codicon-output',
             'Archived': 'codicon-archive',
@@ -985,9 +982,10 @@
             groups.set('Pinned', pinned);
         }
 
-        // Sections in order: Processes, Web Console, Logs
-        groups.set('Processes', []);
+        // Sections in order: Web Console, Processes, Terminals, Logs
         groups.set('Web Console', []);
+        groups.set('Processes', []);
+        groups.set('Terminals', []);
         groups.set('Logs', []);
 
         const nonSpecial = list.filter(w => !pinnedWatcherIds.has(w.id) && !w.archived);
@@ -1010,7 +1008,8 @@
      * @returns {string}
      */
     function getCategory(w) {
-        if (w.type === 'file' || w.type === 'terminal') return 'Logs';
+        if (w.type === 'terminal') return 'Terminals';
+        if (w.type === 'file') return 'Logs';
         if (w.type === 'process') return 'Processes';
         if (w.type === 'web') return 'Web Console';
         return 'Logs';

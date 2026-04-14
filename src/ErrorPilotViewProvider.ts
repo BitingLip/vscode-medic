@@ -177,10 +177,34 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'openFile': {
-                const filePath = msg.file;
+                let filePath = msg.file;
+                // Resolve relative paths against workspace root
+                if (!path.isAbsolute(filePath)) {
+                    const workRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                    if (workRoot) {
+                        filePath = path.join(workRoot, filePath);
+                    }
+                }
                 if (!fs.existsSync(filePath)) {
-                    vscode.window.showWarningMessage(`File not found: ${filePath}`);
-                    break;
+                    // Try finding the file by basename across workspace
+                    const basename = path.basename(filePath);
+                    const results = await vscode.workspace.findFiles(`**/${basename}`, '**/node_modules/**', 5);
+                    if (results.length === 1) {
+                        filePath = results[0].fsPath;
+                    } else if (results.length > 1) {
+                        const picked = await vscode.window.showQuickPick(
+                            results.map(r => ({
+                                label: vscode.workspace.asRelativePath(r),
+                                fsPath: r.fsPath,
+                            })),
+                            { placeHolder: `Multiple matches for ${basename}` },
+                        );
+                        if (!picked) { break; }
+                        filePath = picked.fsPath;
+                    } else {
+                        vscode.window.showWarningMessage(`File not found: ${msg.file}`);
+                        break;
+                    }
                 }
                 const uri = vscode.Uri.file(filePath);
                 const line = msg.line ? msg.line - 1 : 0;
