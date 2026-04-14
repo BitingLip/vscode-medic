@@ -347,9 +347,7 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
                     <button class="icon-btn" id="feed-title-delete" title="Clear all visible errors" style="display:none;">
                         <span class="codicon codicon-trash"></span>
                     </button>
-                    <button class="icon-btn" id="feed-title-clear" data-action="clear-filter" title="Clear filter" style="display:none;">
-                        <span class="codicon codicon-close"></span>
-                    </button>
+
                     <button class="icon-btn" id="feed-title-show-sidebar" title="Show watchers sidebar" style="display:none;">
                         <span class="codicon codicon-layout-sidebar-right"></span>
                     </button>

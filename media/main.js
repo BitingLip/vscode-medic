@@ -459,9 +459,6 @@
                         <span class="error-feed-section-chevron"><span class="codicon codicon-chevron-down"></span></span>
                         <span class="error-feed-section-label">${sec.label}</span>
                         <span class="error-feed-section-counts"></span>
-                        <button class="error-feed-section-delete icon-btn" data-action="delete-section" data-section="${sec.key}" title="Clear section">
-                            <span class="codicon codicon-trash"></span>
-                        </button>
                     </div>
                     <div class="error-feed-section-list"></div>`;
                 $errorFeed.appendChild($section);

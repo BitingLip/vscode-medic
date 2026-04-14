@@ -2,7 +2,7 @@
     "name": "vscode-medic",
     "displayName": "MEDIC",
     "description": "Watches for runtime errors and automatically resolves them with Copilot.",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "publisher": "bitinglip",
     "license": "MIT",
     "icon": "resources/icon.png",

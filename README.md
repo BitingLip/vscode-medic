@@ -28,26 +28,32 @@ MEDIC automates the entire loop:
 ### Error Watchers
 - **Log file monitoring** — Watch any log file for error patterns (supports `.log`, `.txt`, structured logs)
 - **Terminal monitoring** — Capture errors from any VS Code terminal by name pattern
+- **Process discovery** — Automatically finds running OS processes that reference the workspace, extracts log file paths from `Tee-Object`, stdout redirects, and Linux `tee` pipes
+- **Parent chain resolution** — Walks up to 5 levels of the process parent chain to find log file targets, with ancestor inheritance for deep process trees
 - **Built-in presets** — Ready-made patterns for .NET, Python, Node.js, Rust, Go, and more
 - **Custom regex** — Write your own patterns with named capture groups (`message`, `file`, `line`)
 - **UTF-16LE & ANSI support** — Handles Windows-style log files and strips color codes automatically
 
 ### Live Dashboard
-- **Two-column layout** — Error feed on the left, watchers sidebar on the right (responsive single-column on narrow panels)
+- **Four-section sidebar** — Processes, Terminals, Web Console, and Logs — each with grouped counts
+- **Process grouping** — Services sharing a log file are grouped into collapsible clusters (e.g., Cloud Supervisor with 11 proxy service members, frontend groups with vite + esbuild)
+- **Smart naming** — Process names derived from executables: `cloud gateway exe (BitingLip.Cloud.Gateway)`, `vite js (node)`, `Gemini Proxy`
 - **Error cards** — Collapsible cards with source, timestamp, severity icon, and full stack trace
+- **Severity vs. status icons** — Code block sidebar always shows error/warning severity; header shows job status (working, resolved, attention, error)
 - **Duplicate grouping** — Identical errors are grouped with occurrence counters and smooth re-occurrence animations
-- **Status tracking** — Each error flows through `pending → sent → resolved` lifecycle
-- **Source filtering** — Click any watcher name to filter errors from that source
-- **Watcher status dots** — Green/red/gray indicators show which watchers are active
+- **Status tracking** — Each error flows through `pending → working → resolved/attention/error` lifecycle
+- **Source filtering** — Click any watcher or group to filter errors from that source
+- **Watcher status dots** — Color-coded indicators show which watchers are active, erroring, or paused
 
 ### Copilot Integration
+- **Compose box** — Select errors as chips, add guiding notes, and dispatch to Copilot with full context
 - **Chat mode selector** — Choose between Agent (autonomous fixes), Ask (Q&A), or Plan (plan before fixing)
-- **Model selector** — Pick any available language model from the dropdown
+- **Model selector** — Pick any available language model from the dropdown (auto-deduplicates, grouped by vendor)
 - **Session mode** — Send to a new chat session or continue in the active one
 - **Agent participant** — Route to `@workspace`, `@terminal`, `@vscode`, or default Copilot
 - **Approval mode** — Auto-approve agent actions or require confirmation
-- **Compose box** — Add a guiding note to customize how Copilot should approach the fix
 - **Auto-trigger** — Optionally send errors to Copilot automatically on detection (configurable debounce)
+- **Status commands** — Copilot can mark errors as working, resolved, needs attention, or agent error via MEDIC commands
 
 ### Prompt Engineering
 - **Customizable templates** — Full control over the prompt sent to Copilot via template variables
@@ -61,12 +67,14 @@ MEDIC automates the entire loop:
 
 1. **Install** the extension from the VS Code Marketplace (or build from source)
 2. Open the **MEDIC** panel from the Activity Bar (eye + cross icon)
-3. MEDIC auto-creates watchers for common log paths — or click **+** to add your own:
-   - **Log file**: Point to your app's log file (relative or absolute path, supports glob patterns)
-   - **Terminal**: Match terminals by name (e.g., `*` for all, `dotnet*` for .NET terminals)
-4. Errors appear in the dashboard as they're detected
-5. Click the **send** button on any error, or use the compose box to add context before sending
-6. Copilot opens with the error and full context, ready to fix
+3. MEDIC automatically discovers:
+   - **Running processes** referencing your workspace (with log file resolution)
+   - **Open terminals** in VS Code
+   - **Log files** matching common patterns in your workspace
+4. Processes sharing a log file are grouped into collapsible clusters
+5. Errors appear in the dashboard as they're detected
+6. Select errors in the compose box, optionally add context, and send to Copilot
+7. Copilot fixes the code and marks errors as resolved via MEDIC commands
 
 > **Tip:** For the best experience, right-click the MEDIC icon in the Activity Bar and select **"Move to Secondary Side Bar"** to place it alongside Copilot Chat on the right.
 
@@ -108,15 +116,18 @@ All commands are available from the Command Palette (`Ctrl+Shift+P`) under the *
 
 | Command | Description |
 |---------|-------------|
-| `MEDIC: Add Watcher` | Add a new file or terminal watcher |
+| `MEDIC: Add Watcher` | Add a new file, terminal, or process watcher |
 | `MEDIC: Remove Watcher` | Remove a watcher |
-| `MEDIC: Send to Copilot` | Send selected error to Copilot Chat |
+| `MEDIC: Send to Copilot` | Send selected error(s) to Copilot Chat |
 | `MEDIC: Send All Pending` | Send all pending errors in one prompt |
 | `MEDIC: Dismiss Error` | Remove an error from the queue |
 | `MEDIC: Clear All Errors` | Clear the entire error queue |
-| `MEDIC: Mark Error as Fixed` | Manually mark an error as resolved |
+| `MEDIC: Mark Working` | Mark an error as being worked on by the agent |
+| `MEDIC: Mark Attention` | Flag an error as needing user attention |
+| `MEDIC: Mark Agent Error` | Mark an error the agent could not fix |
+| `MEDIC: Resolve Error` | Mark an error as resolved |
 | `MEDIC: Toggle Auto-Trigger` | Enable/disable automatic Copilot dispatch |
-| `MEDIC: Scan Workspace` | Auto-detect and add watchers for common log paths |
+| `MEDIC: Scan Workspace` | Auto-detect and add watchers for common log paths and processes |
 | `MEDIC: Settings` | Open MEDIC settings |
 
 ---
