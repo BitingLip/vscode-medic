@@ -168,11 +168,11 @@
 
     // Error feed sections
     const FEED_SECTIONS = [
+        { key: 'solved', label: 'Solved', statuses: ['resolved'] },
         { key: 'new',    label: 'New',    statuses: ['pending'] },
         { key: 'active', label: 'Active', statuses: ['sent', 'sending', 'working', 'attention', 'error'] },
-        { key: 'solved', label: 'Solved', statuses: ['resolved'] },
     ];
-    const feedSectionCollapsed = { new: false, active: false, solved: false };
+    const feedSectionCollapsed = { new: false, active: false, solved: true };
     /** @type {Map<string, string>} error id → section key (for move animations) */
     let prevErrorSections = new Map();
 
@@ -553,8 +553,11 @@
         const typeEl = card.querySelector('.error-code-type');
         if (typeEl) {
             const sevClass = err.severity === 'error' ? 'severity-error' : 'severity-warning';
-            typeEl.className = `error-code-type ${sevClass} ${statusIconClass(err)}`;
-            // Icon stays as severity — don't swap to status icon
+            typeEl.className = `error-code-type ${sevClass}`;
+            const typeIconSpan = typeEl.querySelector('.codicon');
+            if (typeIconSpan) {
+                typeIconSpan.className = `codicon ${err.severity === 'error' ? 'codicon-error' : 'codicon-warning'}`;
+            }
         }
 
         // Update the header status icon (this one tracks status)
@@ -697,7 +700,6 @@
         const checkboxChecked = isChipSelected ? ' checked' : '';
         const hasOverflow = err.message.split('\n').length > 6;
         const count = err.occurrences || 1;
-        const typeIcon = statusIconForType(err);
 
         el.innerHTML = `
             <div class="error-header">
@@ -719,8 +721,8 @@
             </div>
             <div class="error-body">
                 <div class="error-code-box${hasOverflow ? ' overflows' : ''}">
-                    <div class="error-code-type ${severityClass} ${statusIconClass(err)}">
-                        <span class="codicon ${typeIcon}"></span>
+                    <div class="error-code-type ${severityClass}">
+                        <span class="codicon ${severityIcon}"></span>
                         <span class="error-code-type-count" style="${count > 1 ? '' : 'display:none'}">${count}</span>
                     </div>
                     <div class="error-code-main">
