@@ -47,10 +47,10 @@ export class CopilotBridge implements vscode.Disposable {
             }
             prompt += '\n';
         }
-        prompt += '---\nFor each error, run `errorPilot.markWorking` with its MEDIC ID when you start working on it.\n';
-        prompt += 'If you need user input or attention, run `errorPilot.markAttention` with the MEDIC ID and a reason string.\n';
-        prompt += 'If you cannot fix an error, run `errorPilot.markAgentError` with the MEDIC ID and a reason string.\n';
-        prompt += 'After fixing each error, run `errorPilot.resolveError` with the corresponding MEDIC ID to mark it as resolved.\n';
+        prompt += '---\nFor each error, run `medic.markWorking` with its MEDIC ID when you start working on it.\n';
+        prompt += 'If you need user input or attention, run `medic.markAttention` with the MEDIC ID and a reason string.\n';
+        prompt += 'If you cannot fix an error, run `medic.markAgentError` with the MEDIC ID and a reason string.\n';
+        prompt += 'After fixing each error, run `medic.resolveError` with the corresponding MEDIC ID to mark it as resolved.\n';
         prompt += `Error IDs: ${errors.map(e => `\`${e.id}\``).join(', ')}\n`;
 
         if (guidingPrompt) {
@@ -71,7 +71,7 @@ export class CopilotBridge implements vscode.Disposable {
             return;
         }
 
-        const config = vscode.workspace.getConfiguration('errorPilot');
+        const config = vscode.workspace.getConfiguration('medic');
         const participant = config.get<string>('agent', '');
 
         let prompt = '';
@@ -86,10 +86,10 @@ export class CopilotBridge implements vscode.Disposable {
         }
 
         // Append status-management instructions for each error
-        prompt += '---\nFor each error, run `errorPilot.markWorking` with its MEDIC ID when you start working on it.\n';
-        prompt += 'If you need user input or attention, run `errorPilot.markAttention` with the MEDIC ID and a reason string.\n';
-        prompt += 'If you cannot fix an error, run `errorPilot.markAgentError` with the MEDIC ID and a reason string.\n';
-        prompt += 'After fixing each error, run the VS Code command `errorPilot.resolveError` with the corresponding MEDIC ID to mark it as resolved.\n';
+        prompt += '---\nFor each error, run `medic.markWorking` with its MEDIC ID when you start working on it.\n';
+        prompt += 'If you need user input or attention, run `medic.markAttention` with the MEDIC ID and a reason string.\n';
+        prompt += 'If you cannot fix an error, run `medic.markAgentError` with the MEDIC ID and a reason string.\n';
+        prompt += 'After fixing each error, run the VS Code command `medic.resolveError` with the corresponding MEDIC ID to mark it as resolved.\n';
         prompt += `Error IDs: ${pending.map(e => `\`${e.id}\``).join(', ')}\n`;
 
         if (guidingPrompt) {
@@ -110,7 +110,7 @@ export class CopilotBridge implements vscode.Disposable {
     /** Wire up auto-trigger: when new errors arrive, auto-send after debounce */
     setupAutoTrigger(): void {
         const disposable = this.errorQueue.onNewError((error) => {
-            const config = vscode.workspace.getConfiguration('errorPilot');
+            const config = vscode.workspace.getConfiguration('medic');
             if (!config.get<boolean>('autoTrigger', false)) { return; }
             // In "confirm" mode, never auto-send — user must explicitly dispatch
             if (config.get<string>('approvalMode', 'confirm') !== 'auto') { return; }
@@ -132,7 +132,7 @@ export class CopilotBridge implements vscode.Disposable {
     // ── Internals ────────────────────────────────────────────────────
 
     private buildPrompt(error: ErrorEntry, guidingPrompt?: string): string {
-        const config = vscode.workspace.getConfiguration('errorPilot');
+        const config = vscode.workspace.getConfiguration('medic');
         const participant = config.get<string>('agent', '');
         const template = config.get<string>(
             'promptTemplate',
@@ -158,10 +158,10 @@ export class CopilotBridge implements vscode.Disposable {
 
         // Append resolve instruction so the agent can mark the error as fixed
         prompt += `\n\n---\n**MEDIC ID:** \`${error.id}\``;
-        prompt += `\nWhen you start working on this error, run \`errorPilot.markWorking\` with argument \`${error.id}\`.`;
-        prompt += `\nIf you need user input or attention, run \`errorPilot.markAttention\` with arguments \`${error.id}\` and a reason string.`;
-        prompt += `\nIf you cannot fix this error, run \`errorPilot.markAgentError\` with arguments \`${error.id}\` and a reason string.`;
-        prompt += `\nAfter you have fixed this error, run \`errorPilot.resolveError\` with argument \`${error.id}\` to mark it as resolved.`;
+        prompt += `\nWhen you start working on this error, run \`medic.markWorking\` with argument \`${error.id}\`.`;
+        prompt += `\nIf you need user input or attention, run \`medic.markAttention\` with arguments \`${error.id}\` and a reason string.`;
+        prompt += `\nIf you cannot fix this error, run \`medic.markAgentError\` with arguments \`${error.id}\` and a reason string.`;
+        prompt += `\nAfter you have fixed this error, run \`medic.resolveError\` with argument \`${error.id}\` to mark it as resolved.`;
 
         if (guidingPrompt) {
             prompt += `\n\n**User note:**\n${guidingPrompt}`;
@@ -221,7 +221,7 @@ export class CopilotBridge implements vscode.Disposable {
 
     /** Evaluate all active errors and start/clear watchdog timers as needed */
     private updateWatchdogs(): void {
-        const config = vscode.workspace.getConfiguration('errorPilot');
+        const config = vscode.workspace.getConfiguration('medic');
         const sentTimeoutMin = config.get<number>('watchdog.sentTimeoutMinutes', 2);
         const workingTimeoutMin = config.get<number>('watchdog.workingTimeoutMinutes', 10);
 

@@ -370,6 +370,7 @@ export class WatcherManager implements vscode.Disposable {
                 encoding: 'utf-8',
                 timeout: 15000,
                 windowsHide: true,
+                stdio: ['pipe', 'pipe', 'ignore'],  // suppress CLIXML stderr
             });
 
             const allProcs: Array<{ pid: number; parentPid: number; name: string; cmd: string }> = [];
@@ -750,11 +751,26 @@ export class WatcherManager implements vscode.Disposable {
                         const match = pattern.exec(line);
                         if (match) {
                             this.handleErrorMatch(config, line, match, 'warning');
+                            matched = true;
                             break;
                         }
                     } catch {
                         // Invalid regex — skip
                     }
+                }
+            }
+
+            // Accumulate stack trace continuation lines into the buffered error
+            if (!matched) {
+                const bufferKey = config.id;
+                const existing = this.multiLineBuffer.get(bufferKey);
+                if (existing && /^\s+at\s/.test(line)) {
+                    clearTimeout(existing.timer);
+                    existing.lines.push(line);
+                    const timer = setTimeout(() => {
+                        this.flushMultiLineBuffer(bufferKey);
+                    }, 200);
+                    existing.timer = timer;
                 }
             }
         }
@@ -767,10 +783,7 @@ export class WatcherManager implements vscode.Disposable {
         if (existing) {
             clearTimeout(existing.timer);
             // Flush the previous buffered error immediately before starting a new one
-            this.multiLineBuffer.delete(bufferKey);
-            if (existing.error) {
-                this.errorQueue.push(existing.error);
-            }
+            this.flushMultiLineBuffer(bufferKey);
         }
 
         const message = match.groups?.['message'] ?? match[1] ?? line.trim();
@@ -796,11 +809,38 @@ export class WatcherManager implements vscode.Disposable {
 
         // Debounce slightly to allow stack trace lines to accumulate
         const timer = setTimeout(() => {
-            this.multiLineBuffer.delete(bufferKey);
-            this.errorQueue.push(error);
+            this.flushMultiLineBuffer(bufferKey);
         }, 200);
 
         this.multiLineBuffer.set(bufferKey, { lines: [line], timer, error });
+    }
+
+    private flushMultiLineBuffer(bufferKey: string): void {
+        const entry = this.multiLineBuffer.get(bufferKey);
+        if (!entry?.error) { return; }
+        this.multiLineBuffer.delete(bufferKey);
+
+        // Assemble stack trace from continuation lines (skip the first line which is the error itself)
+        if (entry.lines.length > 1) {
+            const traceLines = entry.lines.slice(1);
+            entry.error.stackTrace = traceLines.join('\n');
+            entry.error.raw = entry.lines.join('\n');
+
+            // If the initial pattern didn't capture file/line, extract from first stack frame
+            if (!entry.error.file) {
+                // Node/JS: at func (file:line:col)
+                const nodeMatch = /\(([^)]+):(\d+):\d+\)/.exec(traceLines[0]);
+                // .NET: in file:line N
+                const dotnetMatch = /in (.+):line (\d+)/.exec(traceLines[0]);
+                const frameMatch = nodeMatch || dotnetMatch;
+                if (frameMatch) {
+                    entry.error.file = frameMatch[1];
+                    entry.error.line = parseInt(frameMatch[2], 10);
+                }
+            }
+        }
+
+        this.errorQueue.push(entry.error);
     }
 
     // ── Public Helpers ──────────────────────────────────────────────────

@@ -1,25 +1,36 @@
 # MEDIC
 
-**Runtime error monitoring for VS Code — automatically dispatches errors to GitHub Copilot for diagnosis and fixing.**
+*Runtime error & warning monitoring with automatic dispatching to GitHub Copilot for diagnosis and fixing.*
 
-MEDIC watches your running application's log files and terminal output for runtime errors, displays them in a real-time dashboard, and sends them straight to GitHub Copilot Chat with full context — so the AI agent can diagnose and fix issues as they happen.
+*Feedback and issues welcome at https://github.com/BitingLip/vscode-medic/issues*
 
-| Error detected in MEDIC dashboard | Copilot diagnosing and fixing the error |
-|---|---|
-| ![MEDIC dashboard showing a captured runtime error](resources/screenshot_01.png) | ![GitHub Copilot Chat resolving the error](resources/screenshot_02.png) |
-
----
-
-## What is MEDIC?
+## Automated fixing of Errors & Warnings with Copilot agents
 
 When you're running a full-stack app, errors can appear anywhere — buried in log files, scrolling past in terminals, or hidden across multiple services. Manually copying errors into Copilot Chat is tedious and slow.
 
-MEDIC automates the entire loop:
+MEDIC automates the entire loop with **continuously running watchers** that spin up **agent sessions** when errors or warnings appear.
 
-1. **Detect** — File and terminal watchers catch errors the moment they appear
-2. **Triage** — Errors show up in a live dashboard with duplicate grouping and severity tracking
-3. **Dispatch** — One click (or auto-trigger) sends errors to Copilot with full context
-4. **Resolve** — Copilot fixes the code; MEDIC marks the error as resolved
+### `Watchers` keep an eye on your workspace
+- **Automated discovery** of processes, terminals and logs
+- Full coverage
+   - **Process** PID's logs
+   - **Terminal** outputs
+   - **Web Console** logs
+- Full automation
+   1. **Detect** — File and terminal watchers catch errors the moment they appear
+   2. **Triage** — Errors show up in a live dashboard with duplicate grouping and severity tracking
+   3. **Dispatch** — One click (or auto-trigger) sends errors to Copilot with full context
+   4. **Resolve** — Copilot fixes the code; MEDIC marks the error as resolved
+
+### `Agents` fix the errors and investigate the warnings
+- Automated workflow
+   - Starting agent sessions for jobs
+   - Prompting the agent with full error context and stack traces
+- Agent interacts with MEDIC extension
+   - Gives status updates `working`, `attention`, `resolved`, `error`
+
+![MEDIC dashboard showing errors in various lifecycle states](resources/preview.png)
+
 
 ---
 
@@ -38,10 +49,11 @@ MEDIC automates the entire loop:
 - **Four-section sidebar** — Processes, Terminals, Web Console, and Logs — each with grouped counts
 - **Process grouping** — Services sharing a log file are grouped into collapsible clusters (e.g., Cloud Supervisor with 11 proxy service members, frontend groups with vite + esbuild)
 - **Smart naming** — Process names derived from executables: `cloud gateway exe (BitingLip.Cloud.Gateway)`, `vite js (node)`, `Gemini Proxy`
-- **Error cards** — Collapsible cards with source, timestamp, severity icon, and full stack trace
+- **Stack trace extraction** — Multi-line stack traces are accumulated and parsed; file references (`file:line:col`) are extracted from Node.js, .NET, and Python frames
+- **Error cards** — Collapsible cards with source, timestamp, severity icon, file references, and full stack trace
 - **Severity vs. status icons** — Code block sidebar always shows error/warning severity; header shows job status (working, resolved, attention, error)
 - **Duplicate grouping** — Identical errors are grouped with occurrence counters and smooth re-occurrence animations
-- **Status tracking** — Each error flows through `pending → working → resolved/attention/error` lifecycle
+- **Status tracking** — Each error flows through `pending → sent → working → resolved/attention/error` lifecycle
 - **Source filtering** — Click any watcher or group to filter errors from that source
 - **Watcher status dots** — Color-coded indicators show which watchers are active, erroring, or paused
 
@@ -53,11 +65,11 @@ MEDIC automates the entire loop:
 - **Agent participant** — Route to `@workspace`, `@terminal`, `@vscode`, or default Copilot
 - **Approval mode** — Auto-approve agent actions or require confirmation
 - **Auto-trigger** — Optionally send errors to Copilot automatically on detection (configurable debounce)
-- **Status commands** — Copilot can mark errors as working, resolved, needs attention, or agent error via MEDIC commands
+- **Status commands** — Copilot can mark errors as working, resolved, needs attention, or agent error via MEDIC commands *(settings use the `medic` prefix)*
 
 ### Prompt Engineering
 - **Customizable templates** — Full control over the prompt sent to Copilot via template variables
-- **Resolve instructions** — Prompts include the `errorPilot.resolveError` command so Copilot can mark errors as fixed
+- **Resolve instructions** — Prompts include the `medic.resolveError` command so Copilot can mark errors as fixed
 - **Multi-error batching** — Select multiple errors and send them in a single prompt
 - **User notes** — Append guidance ("focus on the database layer", "don't modify tests") to any dispatch
 
@@ -82,20 +94,20 @@ MEDIC automates the entire loop:
 
 ## Configuration
 
-All settings are under `errorPilot.*` in VS Code Settings, or configurable directly from the MEDIC dashboard pickers.
+All settings are under `medic.*` in VS Code Settings, or configurable directly from the MEDIC dashboard pickers.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `errorPilot.agent` | `@workspace` | Chat participant to prefix prompts with |
-| `errorPilot.autoTrigger` | `false` | Auto-send errors to Copilot on detection |
-| `errorPilot.debounceMs` | `3000` | Debounce delay before auto-sending (ms) |
-| `errorPilot.promptTemplate` | *(built-in)* | Prompt template with `{source}`, `{error}`, `{file}`, `{line}`, `{raw}`, `{stackTrace}` variables |
-| `errorPilot.maxQueueSize` | `50` | Maximum errors to keep in queue |
-| `errorPilot.approvalMode` | `confirm` | `confirm` or `auto` — whether agent actions need approval |
-| `errorPilot.autoDeleteSession` | `never` | `never`, `done`, or `5min` — auto-delete resolved sessions |
-| `errorPilot.chatMode` | `agent` | Default chat mode: `agent`, `ask`, or `plan` |
-| `errorPilot.chatModel` | *(auto)* | Preferred language model ID |
-| `errorPilot.sessionMode` | `new` | `new` (fresh session per send) or `active` (reuse current) |
+| `medic.agent` | `@workspace` | Chat participant to prefix prompts with |
+| `medic.autoTrigger` | `false` | Auto-send errors to Copilot on detection |
+| `medic.debounceMs` | `3000` | Debounce delay before auto-sending (ms) |
+| `medic.promptTemplate` | *(built-in)* | Prompt template with `{source}`, `{error}`, `{file}`, `{line}`, `{raw}`, `{stackTrace}` variables |
+| `medic.maxQueueSize` | `50` | Maximum errors to keep in queue |
+| `medic.approvalMode` | `confirm` | `confirm` or `auto` — whether agent actions need approval |
+| `medic.autoDeleteSession` | `never` | `never`, `done`, or `5min` — auto-delete resolved sessions |
+| `medic.chatMode` | `agent` | Default chat mode: `agent`, `ask`, or `plan` |
+| `medic.chatModel` | *(auto)* | Preferred language model ID |
+| `medic.sessionMode` | `new` | `new` (fresh session per send) or `active` (reuse current) |
 
 ### Custom Error Patterns
 
@@ -125,10 +137,11 @@ All commands are available from the Command Palette (`Ctrl+Shift+P`) under the *
 | `MEDIC: Mark Working` | Mark an error as being worked on by the agent |
 | `MEDIC: Mark Attention` | Flag an error as needing user attention |
 | `MEDIC: Mark Agent Error` | Mark an error the agent could not fix |
-| `MEDIC: Resolve Error` | Mark an error as resolved |
+| `MEDIC: Mark Error as Fixed` | Mark an error as resolved |
 | `MEDIC: Toggle Auto-Trigger` | Enable/disable automatic Copilot dispatch |
 | `MEDIC: Scan Workspace` | Auto-detect and add watchers for common log paths and processes |
 | `MEDIC: Settings` | Open MEDIC settings |
+| `MEDIC: Demo Lifecycle` | Run a demo cycling through all error statuses |
 
 ---
 
@@ -165,7 +178,7 @@ src/
 ├── ErrorQueue.ts             # In-memory error store with lifecycle tracking
 ├── WatcherManager.ts         # File and terminal watcher management
 ├── CopilotBridge.ts          # Prompt building and Copilot Chat integration
-├── ErrorPilotViewProvider.ts # Webview dashboard provider
+├── MedicViewProvider.ts      # Webview dashboard provider
 └── types.ts                  # Shared types and default watcher presets
 media/
 ├── main.js                   # Webview client-side logic

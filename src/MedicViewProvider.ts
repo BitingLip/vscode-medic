@@ -6,8 +6,8 @@ import { ErrorQueue } from './ErrorQueue';
 import { WatcherManager } from './WatcherManager';
 import { CopilotBridge } from './CopilotBridge';
 
-export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'errorPilot.view';
+export class medicViewProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'medic.view';
 
     private view?: vscode.WebviewView;
     private selectedWatcherId: string | null = null;
@@ -24,7 +24,7 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
             this.errorQueue.onDidChange(() => this.pushState()),
             this.watcherManager.onDidChangeConfigs(() => this.pushState()),
             vscode.workspace.onDidChangeConfiguration((e) => {
-                if (e.affectsConfiguration('errorPilot')) { this.pushState(); }
+                if (e.affectsConfiguration('medic')) { this.pushState(); }
             }),
         );
     }
@@ -67,7 +67,7 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
 
     private pushState(): void {
         if (!this.view) { return; }
-        const config = vscode.workspace.getConfiguration('errorPilot');
+        const config = vscode.workspace.getConfiguration('medic');
         const state: PanelState = {
             errors: this.errorQueue.getAll(),
             watchers: this.watcherManager.getConfigs(),
@@ -163,17 +163,17 @@ export class ErrorPilotViewProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'scanWorkspace':
-                await vscode.commands.executeCommand('errorPilot.scanWorkspace');
+                await vscode.commands.executeCommand('medic.scanWorkspace');
                 break;
 
             case 'updateSetting': {
-                const cfg = vscode.workspace.getConfiguration('errorPilot');
+                const cfg = vscode.workspace.getConfiguration('medic');
                 await cfg.update(msg.key, msg.value, vscode.ConfigurationTarget.Global);
                 break;
             }
 
             case 'openSettings':
-                await vscode.commands.executeCommand('workbench.action.openSettings', 'errorPilot');
+                await vscode.commands.executeCommand('workbench.action.openSettings', 'medic');
                 break;
 
             case 'openFile': {

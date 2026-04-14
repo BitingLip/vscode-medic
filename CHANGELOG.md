@@ -2,6 +2,20 @@
 
 All notable changes to the **MEDIC** extension will be documented in this file.
 
+## [1.0.2] — 2026-04-14
+
+### Changed
+- **Settings prefix renamed** — `errorPilot.*` → `medic.*` across all commands, configuration keys, and view IDs
+- **Class rename** — `ErrorPilotViewProvider` → `MedicViewProvider` (file and class)
+
+### Added
+- **Stack trace extraction** — Multi-line stack traces are now accumulated and parsed; file/line references extracted from Node.js `(file:line:col)` and .NET `in file:line N` frames
+- **Stack trace in error cards** — Errors with stack traces now show clickable file references in the dashboard
+
+### Fixed
+- **CLIXML stderr noise** — Suppressed PowerShell `#< CLIXML` errors from `Get-CimInstance` process scanning
+- **README corrections** — Fixed typos, added missing `sent` status in lifecycle, updated project structure
+
 ## [1.0.1] — 2026-04-14
 
 ### Fixed

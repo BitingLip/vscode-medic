@@ -11,7 +11,7 @@ export class ErrorQueue implements vscode.Disposable {
     readonly onNewError = this._onNewError.event;
 
     get maxSize(): number {
-        return vscode.workspace.getConfiguration('errorPilot').get<number>('maxQueueSize', 50);
+        return vscode.workspace.getConfiguration('medic').get<number>('maxQueueSize', 50);
     }
 
     push(error: ErrorEntry): void {

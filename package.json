@@ -2,7 +2,7 @@
     "name": "vscode-medic",
     "displayName": "MEDIC",
     "description": "Watches for runtime errors and automatically resolves them with Copilot.",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "publisher": "bitinglip",
     "license": "MIT",
     "icon": "resources/icon.png",
@@ -48,101 +48,101 @@
         "viewsContainers": {
             "activitybar": [
                 {
-                    "id": "errorPilot",
+                    "id": "medic",
                     "title": "MEDIC",
                     "icon": "resources/icon.svg"
                 }
             ]
         },
         "views": {
-            "errorPilot": [
+            "medic": [
                 {
                     "type": "webview",
-                    "id": "errorPilot.view",
+                    "id": "medic.view",
                     "name": "MEDIC"
                 }
             ]
         },
         "commands": [
             {
-                "command": "errorPilot.addWatcher",
+                "command": "medic.addWatcher",
                 "title": "Add Watcher",
                 "category": "MEDIC",
                 "icon": "$(add)"
             },
             {
-                "command": "errorPilot.removeWatcher",
+                "command": "medic.removeWatcher",
                 "title": "Remove Watcher",
                 "category": "MEDIC",
                 "icon": "$(trash)"
             },
             {
-                "command": "errorPilot.sendError",
+                "command": "medic.sendError",
                 "title": "Send to Copilot",
                 "category": "MEDIC",
                 "icon": "$(send)"
             },
             {
-                "command": "errorPilot.dismissError",
+                "command": "medic.dismissError",
                 "title": "Dismiss Error",
                 "category": "MEDIC",
                 "icon": "$(close)"
             },
             {
-                "command": "errorPilot.sendAllPending",
+                "command": "medic.sendAllPending",
                 "title": "Send All Pending",
                 "category": "MEDIC",
                 "icon": "$(send)"
             },
             {
-                "command": "errorPilot.clearErrors",
+                "command": "medic.clearErrors",
                 "title": "Clear All Errors",
                 "category": "MEDIC",
                 "icon": "$(clear-all)"
             },
             {
-                "command": "errorPilot.toggleAutoTrigger",
+                "command": "medic.toggleAutoTrigger",
                 "title": "Toggle Auto-Trigger",
                 "category": "MEDIC"
             },
             {
-                "command": "errorPilot.scanWorkspace",
+                "command": "medic.scanWorkspace",
                 "title": "Scan Workspace",
                 "category": "MEDIC",
                 "icon": "$(search)"
             },
             {
-                "command": "errorPilot.openSettings",
+                "command": "medic.openSettings",
                 "title": "Settings",
                 "category": "MEDIC",
                 "icon": "$(settings-gear)"
             },
             {
-                "command": "errorPilot.resolveError",
+                "command": "medic.resolveError",
                 "title": "Mark Error as Fixed",
                 "category": "MEDIC",
                 "icon": "$(pass)"
             },
             {
-                "command": "errorPilot.markWorking",
+                "command": "medic.markWorking",
                 "title": "Mark Error as Working",
                 "category": "MEDIC",
                 "icon": "$(copilot)"
             },
             {
-                "command": "errorPilot.markAttention",
+                "command": "medic.markAttention",
                 "title": "Mark Error as Needs Attention",
                 "category": "MEDIC",
                 "icon": "$(copilot-warning)"
             },
             {
-                "command": "errorPilot.markAgentError",
+                "command": "medic.markAgentError",
                 "title": "Mark Error as Agent Error",
                 "category": "MEDIC",
                 "icon": "$(copilot-error)"
             },
             {
-                "command": "errorPilot.demoLifecycle",
+                "command": "medic.demoLifecycle",
                 "title": "Demo: Error Lifecycle",
                 "category": "MEDIC"
             }
@@ -150,33 +150,33 @@
         "menus": {
             "view/title": [
                 {
-                    "command": "errorPilot.addWatcher",
-                    "when": "view == errorPilot.view",
+                    "command": "medic.addWatcher",
+                    "when": "view == medic.view",
                     "group": "navigation@1"
                 },
                 {
-                    "command": "errorPilot.sendAllPending",
-                    "when": "view == errorPilot.view",
+                    "command": "medic.sendAllPending",
+                    "when": "view == medic.view",
                     "group": "navigation@2"
                 },
                 {
-                    "command": "errorPilot.scanWorkspace",
-                    "when": "view == errorPilot.view",
+                    "command": "medic.scanWorkspace",
+                    "when": "view == medic.view",
                     "group": "1_actions@1"
                 },
                 {
-                    "command": "errorPilot.clearErrors",
-                    "when": "view == errorPilot.view",
+                    "command": "medic.clearErrors",
+                    "when": "view == medic.view",
                     "group": "1_actions@2"
                 },
                 {
-                    "command": "errorPilot.toggleAutoTrigger",
-                    "when": "view == errorPilot.view",
+                    "command": "medic.toggleAutoTrigger",
+                    "when": "view == medic.view",
                     "group": "2_config@1"
                 },
                 {
-                    "command": "errorPilot.openSettings",
-                    "when": "view == errorPilot.view",
+                    "command": "medic.openSettings",
+                    "when": "view == medic.view",
                     "group": "2_config@2"
                 }
             ]
@@ -184,7 +184,7 @@
         "configuration": {
             "title": "MEDIC",
             "properties": {
-                "errorPilot.agent": {
+                "medic.agent": {
                     "type": "string",
                     "default": "@workspace",
                     "enum": [
@@ -201,32 +201,32 @@
                     ],
                     "description": "Chat participant to prefix prompts with"
                 },
-                "errorPilot.autoTrigger": {
+                "medic.autoTrigger": {
                     "type": "boolean",
                     "default": false,
                     "description": "Automatically open Copilot chat when a new error is detected"
                 },
-                "errorPilot.debounceMs": {
+                "medic.debounceMs": {
                     "type": "number",
                     "default": 3000,
                     "minimum": 500,
                     "maximum": 30000,
                     "description": "Debounce time (ms) before auto-triggering Copilot after an error"
                 },
-                "errorPilot.promptTemplate": {
+                "medic.promptTemplate": {
                     "type": "string",
                     "default": "Fix the following runtime error. Identify the root cause in the codebase and apply a fix.\n\nError from {source}:\n```\n{error}\n```\n\n{stackTrace}",
                     "editPresentation": "multilineText",
                     "description": "Prompt template. Variables: {source}, {error}, {file}, {line}, {raw}, {stackTrace}"
                 },
-                "errorPilot.maxQueueSize": {
+                "medic.maxQueueSize": {
                     "type": "number",
                     "default": 50,
                     "minimum": 10,
                     "maximum": 500,
                     "description": "Maximum number of errors to keep in the queue"
                 },
-                "errorPilot.approvalMode": {
+                "medic.approvalMode": {
                     "type": "string",
                     "default": "confirm",
                     "enum": [
@@ -239,7 +239,7 @@
                     ],
                     "description": "Whether to auto-approve agent actions or require confirmation"
                 },
-                "errorPilot.autoDeleteSession": {
+                "medic.autoDeleteSession": {
                     "type": "string",
                     "default": "never",
                     "enum": [
@@ -254,7 +254,7 @@
                     ],
                     "description": "When to auto-delete agent sessions after resolution"
                 },
-                "errorPilot.chatMode": {
+                "medic.chatMode": {
                     "type": "string",
                     "default": "agent",
                     "enum": [
@@ -269,12 +269,12 @@
                     ],
                     "description": "Default chat mode for sending errors"
                 },
-                "errorPilot.chatModel": {
+                "medic.chatModel": {
                     "type": "string",
                     "default": "",
                     "description": "Preferred language model ID (empty = auto)"
                 },
-                "errorPilot.sessionMode": {
+                "medic.sessionMode": {
                     "type": "string",
                     "default": "new",
                     "enum": [
@@ -287,14 +287,14 @@
                     ],
                     "description": "Whether to open a new chat session or use the active one"
                 },
-                "errorPilot.watchdog.sentTimeoutMinutes": {
+                "medic.watchdog.sentTimeoutMinutes": {
                     "type": "number",
                     "default": 2,
                     "minimum": 0.5,
                     "maximum": 60,
                     "description": "Minutes to wait for agent to start working before escalating to attention"
                 },
-                "errorPilot.watchdog.workingTimeoutMinutes": {
+                "medic.watchdog.workingTimeoutMinutes": {
                     "type": "number",
                     "default": 10,
                     "minimum": 1,

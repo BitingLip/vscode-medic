@@ -1,8 +1,8 @@
-ï»¿import * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import { ErrorQueue } from './ErrorQueue';
 import { WatcherManager } from './WatcherManager';
 import { CopilotBridge } from './CopilotBridge';
-import { ErrorPilotViewProvider } from './ErrorPilotViewProvider';
+import { medicViewProvider } from './medicViewProvider';
 
 let errorQueue: ErrorQueue;
 let watcherManager: WatcherManager;
@@ -19,9 +19,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await watcherManager.discoverAll();
     }
 
-    const viewProvider = new ErrorPilotViewProvider(context.extensionUri, errorQueue, watcherManager, copilotBridge);
+    const viewProvider = new medicViewProvider(context.extensionUri, errorQueue, watcherManager, copilotBridge);
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(ErrorPilotViewProvider.viewType, viewProvider, {
+        vscode.window.registerWebviewViewProvider(medicViewProvider.viewType, viewProvider, {
             webviewOptions: { retainContextWhenHidden: true },
         }),
     );
@@ -34,7 +34,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     // First-run: suggest moving to secondary sidebar (right)
-    const shownTipKey = 'errorPilot.shownSidebarTip';
+    const shownTipKey = 'medic.shownSidebarTip';
     if (!context.globalState.get<boolean>(shownTipKey)) {
         context.globalState.update(shownTipKey, true);
         vscode.window.showInformationMessage(
@@ -44,20 +44,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.addWatcher', () => {
-            vscode.commands.executeCommand('errorPilot.view.focus');
+        vscode.commands.registerCommand('medic.addWatcher', () => {
+            vscode.commands.executeCommand('medic.view.focus');
             viewProvider.showAddWatcher();
         }),
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.removeWatcher', async (item?: any) => {
+        vscode.commands.registerCommand('medic.removeWatcher', async (item?: any) => {
             if (item?.id) { await watcherManager.removeWatcher(item.id); }
         }),
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.sendError', async (item?: any) => {
+        vscode.commands.registerCommand('medic.sendError', async (item?: any) => {
             if (item?.id) {
                 const error = errorQueue.getAll().find((e) => e.id === item.id);
                 if (error) { await copilotBridge.sendError(error); }
@@ -66,26 +66,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.dismissError', (item?: any) => {
+        vscode.commands.registerCommand('medic.dismissError', (item?: any) => {
             if (item?.id) { errorQueue.remove(item.id); }
         }),
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.sendAllPending', async () => {
+        vscode.commands.registerCommand('medic.sendAllPending', async () => {
             await copilotBridge.sendAllPending();
         }),
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.clearErrors', () => {
+        vscode.commands.registerCommand('medic.clearErrors', () => {
             errorQueue.clear();
         }),
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.toggleAutoTrigger', async () => {
-            const config = vscode.workspace.getConfiguration('errorPilot');
+        vscode.commands.registerCommand('medic.toggleAutoTrigger', async () => {
+            const config = vscode.workspace.getConfiguration('medic');
             const current = config.get<boolean>('autoTrigger', false);
             await config.update('autoTrigger', !current, vscode.ConfigurationTarget.Global);
             vscode.window.showInformationMessage(`MEDIC: Auto-trigger ${!current ? 'enabled' : 'disabled'}`);
@@ -93,13 +93,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.openSettings', () => {
-            vscode.commands.executeCommand('workbench.action.openSettings', 'errorPilot');
+        vscode.commands.registerCommand('medic.openSettings', () => {
+            vscode.commands.executeCommand('workbench.action.openSettings', 'medic');
         }),
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.resolveError', (errorId?: string) => {
+        vscode.commands.registerCommand('medic.resolveError', (errorId?: string) => {
             if (!errorId) {
                 // Fallback: resolve the most recently sent error
                 const sent = errorQueue.getAll()
@@ -123,7 +123,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.markWorking', (errorId?: string) => {
+        vscode.commands.registerCommand('medic.markWorking', (errorId?: string) => {
             if (!errorId) {
                 const sent = errorQueue.getAll()
                     .filter(e => e.status === 'sent')
@@ -137,7 +137,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.markAttention', (errorId?: string, reason?: string) => {
+        vscode.commands.registerCommand('medic.markAttention', (errorId?: string, reason?: string) => {
             if (!errorId) {
                 const working = errorQueue.getAll()
                     .filter(e => e.status === 'working' || e.status === 'sent')
@@ -149,14 +149,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (error) {
                 errorQueue.markAttention(error.id);
                 if (reason) {
-                    vscode.window.showWarningMessage(`MEDIC: Attention needed â€” ${reason}`);
+                    vscode.window.showWarningMessage(`MEDIC: Attention needed — ${reason}`);
                 }
             }
         }),
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.markAgentError', (errorId?: string, reason?: string) => {
+        vscode.commands.registerCommand('medic.markAgentError', (errorId?: string, reason?: string) => {
             if (!errorId) {
                 const active = errorQueue.getAll()
                     .filter(e => e.status === 'working' || e.status === 'sent')
@@ -167,13 +167,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const error = errorQueue.getAll().find(e => e.id === errorId);
             if (error) {
                 errorQueue.markAgentError(error.id);
-                vscode.window.showErrorMessage(`MEDIC: Agent error â€” ${reason ?? error.message.slice(0, 60)}`);
+                vscode.window.showErrorMessage(`MEDIC: Agent error — ${reason ?? error.message.slice(0, 60)}`);
             }
         }),
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.demoLifecycle', async () => {
+        vscode.commands.registerCommand('medic.demoLifecycle', async () => {
             const id = `demo-${Date.now().toString(36)}`;
             const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -209,12 +209,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
             await delay(2500);
             errorQueue.markResolved(id);
-            vscode.window.showInformationMessage('MEDIC Demo: resolved âœ“');
+            vscode.window.showInformationMessage('MEDIC Demo: resolved ?');
         }),
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('errorPilot.scanWorkspace', async () => {
+        vscode.commands.registerCommand('medic.scanWorkspace', async () => {
             const { added, removed } = await watcherManager.discoverAll(viewProvider.getPinnedIds());
             const parts: string[] = [];
             if (added > 0) { parts.push(`discovered ${added}`); }
@@ -222,20 +222,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             vscode.window.showInformationMessage(
                 parts.length > 0
                     ? `MEDIC: ${parts.join(', ')} watcher${added + removed > 1 ? 's' : ''}.`
-                    : 'MEDIC: No changes â€” all watchers up to date.',
+                    : 'MEDIC: No changes — all watchers up to date.',
             );
         }),
     );
 
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    statusBarItem.command = 'errorPilot.view.focus';
+    statusBarItem.command = 'medic.view.focus';
     context.subscriptions.push(statusBarItem);
 
     function updateStatusBar(): void {
         const count = errorQueue.pendingCount;
         if (count > 0) {
             statusBarItem.text = `$(bug) ${count}`;
-            statusBarItem.tooltip = `MEDIC: ${count} pending error${count > 1 ? 's' : ''} â€” click to open`;
+            statusBarItem.tooltip = `MEDIC: ${count} pending error${count > 1 ? 's' : ''} — click to open`;
             statusBarItem.show();
         } else {
             statusBarItem.hide();
