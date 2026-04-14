@@ -549,15 +549,21 @@
         const isChip = selectedErrorIds.has(err.id);
         card.className = `error-item-container ${err.status}${isChip ? ' chip-selected' : ''}`;
 
-        // Update the .error-code-type sidebar (severity icon + count)
+        // Update the .error-code-type sidebar (always severity icon, never status)
         const typeEl = card.querySelector('.error-code-type');
         if (typeEl) {
             const sevClass = err.severity === 'error' ? 'severity-error' : 'severity-warning';
             typeEl.className = `error-code-type ${sevClass} ${statusIconClass(err)}`;
-            const iconSpan = typeEl.querySelector('.codicon');
+            // Icon stays as severity — don't swap to status icon
+        }
+
+        // Update the header status icon (this one tracks status)
+        const headerStatusIcon = card.querySelector('.error-status-icon');
+        if (headerStatusIcon) {
+            headerStatusIcon.className = `error-status-icon ${statusIconClass(err)}`;
+            const iconSpan = headerStatusIcon.querySelector('.codicon');
             if (iconSpan) {
-                const newIcon = statusIconForType(err);
-                iconSpan.className = `codicon ${newIcon}`;
+                iconSpan.className = `codicon ${statusIconForType(err)}`;
             }
         }
 
@@ -738,7 +744,7 @@
                     ${fileLinks.map(f => {
                         const basename = f.file.replace(/^.*[\\/]/, '');
                         return `<a class="error-context-file" data-file="${esc(f.file)}" data-line="${f.line || ''}" title="${esc(f.file)}${f.line ? ':' + f.line : ''}">
-                            ${f.line ? `<span class="error-context-line-col">${f.line}</span>` : ''}<span class="error-context-name"><span class="codicon codicon-file-code"></span><span class="error-context-path">${esc(basename)}</span></span>
+                            ${f.line ? `<span class="error-context-line-col">${f.line}</span>` : ''}<span class="error-context-name"><span class="error-context-path">${esc(basename)}</span></span>
                         </a>`;
                     }).join('')}
                 </div>` : ''}
@@ -933,10 +939,18 @@
 
             const icon = sectionIcons[sectionName] || 'codicon-list-unordered';
 
+            // For Processes, count visible items (groups + ungrouped) instead of raw watcher count
+            let displayCount = sectionWatchers.length;
+            let pGroups, ungrouped;
+            if (sectionName === 'Processes' && sectionWatchers.length > 0) {
+                ({ groups: pGroups, ungrouped } = groupProcessesByLog(sectionWatchers));
+                displayCount = pGroups.length + ungrouped.length;
+            }
+
             sectionEl.innerHTML = `
                 <div class="watcher-section-header">
                     <span class="watcher-section-label">${esc(sectionName)}</span>
-                    <span class="watcher-section-count">${sectionWatchers.length}</span>
+                    <span class="watcher-section-count">${displayCount}</span>
                 </div>
                 <div class="watcher-section-list"></div>`;
 
@@ -948,8 +962,7 @@
                 emptyEl.textContent = sectionName === 'Web Console' ? 'Chrome plugin — coming soon' : 'No watchers';
                 listEl?.appendChild(emptyEl);
             } else if (sectionName === 'Processes') {
-                // Group process watchers that share a log file
-                const { groups: pGroups, ungrouped } = groupProcessesByLog(sectionWatchers);
+                // Groups already computed above for the count
                 for (const g of pGroups) {
                     listEl?.appendChild(createWatcherGroupItem(g));
                 }
@@ -982,10 +995,10 @@
             groups.set('Pinned', pinned);
         }
 
-        // Sections in order: Web Console, Processes, Terminals, Logs
+        // Sections in order: Web Console, Terminals, Processes, Logs
         groups.set('Web Console', []);
-        groups.set('Processes', []);
         groups.set('Terminals', []);
+        groups.set('Processes', []);
         groups.set('Logs', []);
 
         const nonSpecial = list.filter(w => !pinnedWatcherIds.has(w.id) && !w.archived);
@@ -1216,15 +1229,19 @@
     /* ── Workspace (participant) Picker ────────────────────────────── */
 
     const workspaceOptions = [
-        { id: '', label: 'Default', icon: 'codicon-comment' },
-        { id: '@workspace', label: '@workspace', icon: 'codicon-folder' },
-        { id: '@terminal', label: '@terminal', icon: 'codicon-terminal' },
-        { id: '@vscode', label: '@vscode', icon: 'codicon-settings-gear' },
+        { id: '@workspace', label: 'Workspace', icon: 'codicon-folder' },
+        { id: '@terminal', label: 'Terminal', icon: 'codicon-terminal' },
+        { id: '@vscode', label: 'Vscode', icon: 'codicon-settings-gear' },
     ];
 
     function renderWorkspacePicker() {
         if (!$workspacePickerDropdown) return;
         $workspacePickerDropdown.innerHTML = '';
+
+        const header = document.createElement('div');
+        header.className = 'compose-picker-section';
+        header.textContent = 'Where watchers are active';
+        $workspacePickerDropdown.appendChild(header);
 
         for (const w of workspaceOptions) {
             const opt = document.createElement('div');
@@ -1234,26 +1251,31 @@
             $workspacePickerDropdown.appendChild(opt);
         }
 
-        const current = workspaceOptions.find(w => w.id === settings.agent) || workspaceOptions[1];
+        const current = workspaceOptions.find(w => w.id === settings.agent) || workspaceOptions[0];
         if ($workspacePickerLabel) $workspacePickerLabel.textContent = current.label;
     }
 
     /* ── Approvals Picker ──────────────────────────────────────────── */
 
     const approvalsOptions = [
-        { id: 'confirm', label: 'Confirm', icon: 'codicon-shield', desc: 'Ask before applying changes' },
-        { id: 'auto', label: 'Auto-approve', icon: 'codicon-check-all', desc: 'Apply changes automatically' },
+        { id: 'confirm', label: 'Confirm first', icon: 'codicon-shield' },
+        { id: 'auto', label: 'Autoapprove', icon: 'codicon-check-all' },
     ];
 
     function renderApprovalsPicker() {
         if (!$approvalsPickerDropdown) return;
         $approvalsPickerDropdown.innerHTML = '';
 
+        const header = document.createElement('div');
+        header.className = 'compose-picker-section';
+        header.textContent = 'Route jobs to agent';
+        $approvalsPickerDropdown.appendChild(header);
+
         for (const a of approvalsOptions) {
             const opt = document.createElement('div');
             opt.className = `compose-picker-option${a.id === settings.approvalMode ? ' active' : ''}`;
             opt.dataset.approval = a.id;
-            opt.innerHTML = `<span class="codicon ${a.icon}"></span><span class="compose-picker-option-label">${esc(a.label)}</span><span class="compose-picker-option-meta">${esc(a.desc)}</span>`;
+            opt.innerHTML = `<span class="codicon ${a.icon}"></span><span class="compose-picker-option-label">${esc(a.label)}</span>`;
             $approvalsPickerDropdown.appendChild(opt);
         }
 
@@ -1264,20 +1286,25 @@
     /* ── Auto-delete Sessions Picker ────────────────────────────────── */
 
     const autodeleteOptions = [
-        { id: 'never', label: 'Never', icon: 'codicon-circle-slash', desc: 'Keep all sessions' },
-        { id: 'done', label: 'When done', icon: 'codicon-check', desc: 'Delete session once resolved' },
-        { id: '5min', label: 'After 5 min', icon: 'codicon-clock', desc: 'Delete 5 min after resolution' },
+        { id: 'never', label: 'Never', icon: 'codicon-circle-slash' },
+        { id: 'done', label: 'Once resolved', icon: 'codicon-check' },
+        { id: '5min', label: 'After 5 minutes', icon: 'codicon-clock' },
     ];
 
     function renderAutodeletePicker() {
         if (!$autodeletePickerDropdown) return;
         $autodeletePickerDropdown.innerHTML = '';
 
+        const header = document.createElement('div');
+        header.className = 'compose-picker-section';
+        header.textContent = 'Delete resolved sessions';
+        $autodeletePickerDropdown.appendChild(header);
+
         for (const a of autodeleteOptions) {
             const opt = document.createElement('div');
             opt.className = `compose-picker-option${a.id === settings.autoDeleteSession ? ' active' : ''}`;
             opt.dataset.autodelete = a.id;
-            opt.innerHTML = `<span class="codicon ${a.icon}"></span><span class="compose-picker-option-label">${esc(a.label)}</span><span class="compose-picker-option-meta">${esc(a.desc)}</span>`;
+            opt.innerHTML = `<span class="codicon ${a.icon}"></span><span class="compose-picker-option-label">${esc(a.label)}</span>`;
             $autodeletePickerDropdown.appendChild(opt);
         }
 
@@ -1288,19 +1315,24 @@
     /* ── Session Mode Picker ─────────────────────────────────────── */
 
     const sessionOptions = [
-        { id: 'new', label: 'New session', icon: 'codicon-window', desc: 'Open a new chat session' },
-        { id: 'active', label: 'Active session', icon: 'codicon-comment-discussion', desc: 'Send into the current chat' },
+        { id: 'active', label: 'Active session', icon: 'codicon-comment-discussion' },
+        { id: 'new', label: 'New session per job', icon: 'codicon-window' },
     ];
 
     function renderSessionPicker() {
         if (!$sessionPickerDropdown) return;
         $sessionPickerDropdown.innerHTML = '';
 
+        const header = document.createElement('div');
+        header.className = 'compose-picker-section';
+        header.textContent = 'Route jobs to session';
+        $sessionPickerDropdown.appendChild(header);
+
         for (const s of sessionOptions) {
             const opt = document.createElement('div');
             opt.className = `compose-picker-option${s.id === settings.sessionMode ? ' active' : ''}`;
             opt.dataset.session = s.id;
-            opt.innerHTML = `<span class="codicon ${s.icon}"></span><span class="compose-picker-option-label">${esc(s.label)}</span><span class="compose-picker-option-meta">${esc(s.desc)}</span>`;
+            opt.innerHTML = `<span class="codicon ${s.icon}"></span><span class="compose-picker-option-label">${esc(s.label)}</span>`;
             $sessionPickerDropdown.appendChild(opt);
         }
 

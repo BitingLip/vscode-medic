@@ -168,7 +168,7 @@ export class WatcherManager implements vscode.Disposable {
         }
 
         // 3. Discover running OS processes that reference the workspace
-        const { added: processAdded, pidInfo } = await this.discoverOsProcesses(protectedIds);
+        const { added: processAdded, updated: processUpdated, pidInfo } = await this.discoverOsProcesses(protectedIds);
         added += processAdded;
 
         // 4. Deduplicate: remove file watchers whose path is claimed by a process watcher
@@ -224,7 +224,7 @@ export class WatcherManager implements vscode.Disposable {
             removed++;
         }
 
-        if (added > 0 || removed > 0) {
+        if (added > 0 || removed > 0 || processUpdated > 0) {
             await this.saveConfigs();
             this._onDidChangeConfigs.fire();
         }
@@ -415,11 +415,11 @@ export class WatcherManager implements vscode.Disposable {
      * Dynamic scanning — no hardcoded service list. Extracts log file paths
      * by walking the parent process chain to find Tee-Object / redirect targets.
      */
-    async discoverOsProcesses(protectedIds?: Set<string>): Promise<{ added: number; pidInfo: Map<number, { parentPid: number; cmd: string }> }> {
-        if (process.platform !== 'win32') { return { added: 0, pidInfo: new Map() }; } // TODO: Linux/Mac support
+    async discoverOsProcesses(protectedIds?: Set<string>): Promise<{ added: number; updated: number; pidInfo: Map<number, { parentPid: number; cmd: string }> }> {
+        if (process.platform !== 'win32') { return { added: 0, updated: 0, pidInfo: new Map() }; } // TODO: Linux/Mac support
 
         const { procs, pidInfo } = this.scanOsProcesses();
-        if (procs.length === 0) { return { added: 0, pidInfo }; }
+        if (procs.length === 0) { return { added: 0, updated: 0, pidInfo }; }
 
         const existingPids = new Set(
             this.configs.filter(c => c.type === 'process' && c.pid).map(c => c.pid!)
@@ -458,16 +458,37 @@ export class WatcherManager implements vscode.Disposable {
             this.output.appendLine(`[Process Discovery] Found ${name} (PID ${proc.pid}${logFile ? ', log: ' + path.basename(logFile) : ', no log'})`);
         }
 
-        // Update logFile/logFileExists on existing process watchers (in case files appeared)
+        // Update logFile/logFileExists and names on existing process watchers
+        let updated = 0;
         for (const c of this.configs) {
             if (c.type !== 'process' || !c.pid) { continue; }
             const info = pidInfo.get(c.pid);
-            if (!info) { continue; }
+            if (!info) {
+                this.output.appendLine(`[Process Discovery] Update: ${c.name} (PID ${c.pid}) — not in pidInfo, skipping`);
+                continue;
+            }
+
+            // Re-derive name from current process info
+            const proc = procs.find(p => p.pid === c.pid);
+            if (proc) {
+                const freshName = WatcherManager.deriveName(proc);
+                if (freshName !== c.name) {
+                    this.output.appendLine(`[Process Discovery] Rename: "${c.name}" → "${freshName}" (PID ${c.pid})`);
+                    c.name = freshName;
+                    updated++;
+                }
+            }
+
             if (!c.logFile) {
+                this.output.appendLine(`[Process Discovery] Update: ${c.name} (PID ${c.pid}) — no logFile, resolving (parentPid=${info.parentPid})...`);
                 const logFile = WatcherManager.resolveLogFile(info.cmd, info.parentPid, pidInfo);
                 if (logFile) {
                     c.logFile = logFile;
                     c.logFileExists = fs.existsSync(logFile);
+                    updated++;
+                    this.output.appendLine(`[Process Discovery] Update: ${c.name} (PID ${c.pid}) — resolved log: ${path.basename(logFile)}`);
+                } else {
+                    this.output.appendLine(`[Process Discovery] Update: ${c.name} (PID ${c.pid}) — resolveLogFile returned null`);
                 }
             } else {
                 c.logFileExists = fs.existsSync(c.logFile);
@@ -493,6 +514,7 @@ export class WatcherManager implements vscode.Disposable {
                     if (ancestorLog) {
                         c.logFile = ancestorLog;
                         c.logFileExists = fs.existsSync(ancestorLog);
+                        updated++;
                         this.output.appendLine(`[Process Discovery] Inherited log '${path.basename(ancestorLog)}' for ${c.name} (PID ${c.pid}) from ancestor PID ${currentPid}`);
                         break;
                     }
@@ -501,7 +523,7 @@ export class WatcherManager implements vscode.Disposable {
             }
         }
 
-        return { added, pidInfo };
+        return { added, updated, pidInfo };
     }
 
     async addWatcher(config: WatcherConfig): Promise<void> {
