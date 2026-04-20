@@ -10,6 +10,9 @@ export class ErrorQueue implements vscode.Disposable {
     private readonly _onNewError = new vscode.EventEmitter<ErrorEntry>();
     readonly onNewError = this._onNewError.event;
 
+    /** Debounce timer for duplicate-bump change events */
+    private dupChangeTimer: ReturnType<typeof setTimeout> | undefined;
+
     get maxSize(): number {
         return vscode.workspace.getConfiguration('medic').get<number>('maxQueueSize', 50);
     }
@@ -30,7 +33,13 @@ export class ErrorQueue implements vscode.Disposable {
             if (error.timestamp < existing.timestamp) {
                 existing.timestamp = error.timestamp;
             }
-            this._onDidChange.fire();
+            // Debounce change events for rapid-fire duplicates (e.g. React render loops)
+            if (!this.dupChangeTimer) {
+                this.dupChangeTimer = setTimeout(() => {
+                    this.dupChangeTimer = undefined;
+                    this._onDidChange.fire();
+                }, 500);
+            }
             // Don't fire onNewError — no need to trigger agent for duplicates
             return;
         }
@@ -119,6 +128,9 @@ export class ErrorQueue implements vscode.Disposable {
     }
 
     dispose(): void {
+        if (this.dupChangeTimer) {
+            clearTimeout(this.dupChangeTimer);
+        }
         this._onDidChange.dispose();
         this._onNewError.dispose();
     }

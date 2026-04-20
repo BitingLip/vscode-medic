@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ErrorQueue } from './ErrorQueue';
 import { WatcherManager } from './WatcherManager';
 import { CopilotBridge } from './CopilotBridge';
-import { medicViewProvider } from './medicViewProvider';
+import { medicViewProvider } from './MedicViewProvider';
 
 let errorQueue: ErrorQueue;
 let watcherManager: WatcherManager;
@@ -149,7 +149,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (error) {
                 errorQueue.markAttention(error.id);
                 if (reason) {
-                    vscode.window.showWarningMessage(`MEDIC: Attention needed — ${reason}`);
+                    vscode.window.showWarningMessage(`MEDIC: Attention needed ï¿½ ${reason}`);
                 }
             }
         }),
@@ -167,7 +167,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const error = errorQueue.getAll().find(e => e.id === errorId);
             if (error) {
                 errorQueue.markAgentError(error.id);
-                vscode.window.showErrorMessage(`MEDIC: Agent error — ${reason ?? error.message.slice(0, 60)}`);
+                vscode.window.showErrorMessage(`MEDIC: Agent error ï¿½ ${reason ?? error.message.slice(0, 60)}`);
             }
         }),
     );
@@ -222,7 +222,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             vscode.window.showInformationMessage(
                 parts.length > 0
                     ? `MEDIC: ${parts.join(', ')} watcher${added + removed > 1 ? 's' : ''}.`
-                    : 'MEDIC: No changes — all watchers up to date.',
+                    : 'MEDIC: No changes ï¿½ all watchers up to date.',
             );
         }),
     );
@@ -235,7 +235,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const count = errorQueue.pendingCount;
         if (count > 0) {
             statusBarItem.text = `$(bug) ${count}`;
-            statusBarItem.tooltip = `MEDIC: ${count} pending error${count > 1 ? 's' : ''} — click to open`;
+            statusBarItem.tooltip = `MEDIC: ${count} pending error${count > 1 ? 's' : ''} ï¿½ click to open`;
             statusBarItem.show();
         } else {
             statusBarItem.hide();

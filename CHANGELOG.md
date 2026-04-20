@@ -2,6 +2,13 @@
 
 All notable changes to the **MEDIC** extension will be documented in this file.
 
+## [1.1.0] — 2026-04-14
+
+### Added
+- **Browser Console Bridge** — WebSocket server on `ws://localhost:18988` receives errors/warnings from the companion Chrome extension
+- **Chrome extension** — Content script hooks `console.error`, `console.warn`, `window.onerror`, and `unhandledrejection`; background service worker manages the WebSocket connection with auto-reconnect and offline queuing; popup UI shows connection status with enable/disable toggle
+- **Auto-created web watchers** — Each connecting browser origin automatically gets a watcher in the "Web Console" sidebar section
+
 ## [1.0.2] — 2026-04-14
 
 ### Changed

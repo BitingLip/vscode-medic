@@ -8,7 +8,7 @@ async function main() {
         entryPoints: ['src/extension.ts'],
         bundle: true,
         outfile: 'dist/extension.js',
-        external: ['vscode'],
+        external: ['vscode', 'bufferutil', 'utf-8-validate'],
         format: 'cjs',
         platform: 'node',
         target: 'node18',

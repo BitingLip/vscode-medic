@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MEDIC</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      color: #cccccc;
+      background: #1e1e1e;
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid #2d2d2d;
+      background: #252526;
+    }
+    .header-logo {
+      position: relative;
+      width: 22px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+    .header-logo svg {
+      width: 22px;
+      height: 22px;
+      color: #cccccc;
+    }
+    .header-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      flex: 1;
+      color: #cccccc;
+    }
+    .header-status {
+      position: relative;
+      display: flex;
+      align-items: center;
+      cursor: default;
+    }
+    .header-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .header-dot.connected { background: #4CAF50; }
+    .header-dot.connecting { background: #FF9800; animation: pulse 1s infinite; }
+    .header-dot.disconnected { background: #F44336; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .header-tooltip {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      background: #383838;
+      border: 1px solid #505050;
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 11px;
+      color: #ccc;
+      white-space: nowrap;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
+    .header-status:hover .header-tooltip { display: block; }
+
+    /* ── Sections ────────────────────────────────────── */
+    .section {
+      padding: 10px 14px;
+      border-bottom: 1px solid #2d2d2d;
+    }
+    .section:last-child { border-bottom: none; }
+
+    /* ── Toggle Row ──────────────────────────────────── */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 0;
+    }
+    .toggle-label {
+      font-size: 12px;
+      color: #cccccc;
+    }
+    .toggle-sublabel {
+      font-size: 10px;
+      color: #666;
+      margin-top: 1px;
+    }
+    .toggle-switch {
+      position: relative;
+      width: 34px;
+      height: 18px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .toggle-switch input { display: none; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: #3c3c3c;
+      border-radius: 9px;
+      transition: background 0.15s;
+    }
+    .toggle-switch input:checked + .toggle-track { background: #0e639c; }
+    .toggle-thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #ccc;
+      transition: transform 0.15s;
+    }
+    .toggle-switch input:checked ~ .toggle-thumb { transform: translateX(16px); }
+
+    /* ── Domain Input (matches error-code-box input style) ──── */
+    .domain-input-row {
+      display: flex;
+      gap: 0;
+      border: 1px solid #3c3c3c;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #313131;
+      transition: border-color 0.15s;
+    }
+    .domain-input-row:focus-within {
+      border-color: #0e639c;
+    }
+    .domain-input {
+      flex: 1;
+      padding: 7px 10px;
+      background: transparent;
+      border: none;
+      color: #d4d4d4;
+      font-size: 12px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      line-height: 1.5;
+      outline: none;
+    }
+    .domain-input::placeholder { color: #555; }
+    .btn-add {
+      padding: 7px 12px;
+      background: #1f1f1f;
+      color: #ccc;
+      border: none;
+      border-left: 1px solid #3c3c3c;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1;
+      transition: background 0.15s, color 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-add:hover { background: #2a2a2a; color: #fff; }
+    .btn-add:active { background: #1a1a1a; }
+
+    /* ── Domain List (error-code-box style) ──────────── */
+    .domain-list {
+      margin-top: 8px;
+      overflow: hidden;
+      transition: max-height 0.25s ease;
+    }
+    .domain-list.collapsed {
+      max-height: var(--collapsed-height, 152px);
+    }
+    .domain-list.expanded {
+      max-height: 600px;
+    }
+
+    .domain-item {
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      margin-bottom: 4px;
+      border: 1px solid #3c3c3c;
+      border-radius: 6px;
+      transition: border-color 0.15s;
+    }
+    .domain-item:last-child { margin-bottom: 0; }
+    .domain-item:hover { border-color: #505050; }
+
+    .domain-item-type {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      min-height: 32px;
+      background: #1f1f1f;
+      border-right: 1px solid #3c3c3c;
+      flex-shrink: 0;
+      color: #666;
+      font-size: 13px;
+    }
+    .domain-item-type.active { color: #4CAF50; }
+
+    .domain-item-main {
+      flex: 1;
+      min-width: 0;
+      padding: 6px 10px;
+      background: #313131;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #d4d4d4;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .domain-item .btn-remove {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      min-height: 32px;
+      background: #313131;
+      border: none;
+      border-left: 1px solid transparent;
+      color: transparent;
+      cursor: pointer;
+      font-size: 12px;
+      transition: color 0.15s, border-color 0.15s;
+      flex-shrink: 0;
+    }
+    .domain-item:hover .btn-remove {
+      color: #666;
+      border-left-color: #3c3c3c;
+    }
+    .domain-item .btn-remove:hover { color: #e05050; }
+
+    .domain-empty {
+      font-size: 11px;
+      color: #555;
+      text-align: center;
+      padding: 14px 0;
+      font-style: italic;
+    }
+
+    /* ── Expand / collapse chevron bar ────────────────── */
+    .expand-bar {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 2px 0;
+      margin-top: 4px;
+      cursor: pointer;
+      color: #555;
+      font-size: 11px;
+      transition: color 0.15s;
+      border: 1px solid transparent;
+      border-radius: 6px;
+    }
+    .expand-bar:hover { color: #ccc; background: rgba(255,255,255,0.03); border-color: #3c3c3c; }
+    .expand-bar.visible { display: flex; }
+    .expand-bar .chevron {
+      transition: transform 0.2s;
+    }
+    .expand-bar.expanded .chevron { transform: rotate(180deg); }
+
+    /* ── Actions ─────────────────────────────────────── */
+    .btn-reconnect {
+      width: 100%;
+      padding: 6px 12px;
+      background: #313131;
+      border: 1px solid #3c3c3c;
+      border-radius: 6px;
+      color: #999;
+      cursor: pointer;
+      font-size: 11px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .btn-reconnect:hover { background: #383838; color: #ccc; border-color: #505050; }
+
+    .info {
+      padding: 8px 14px;
+      font-size: 10px;
+      color: #444;
+      text-align: center;
+      border-top: 1px solid #2d2d2d;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header with logo + connection status -->
+  <div class="header">
+    <div class="header-logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M2 12C2 12 5.5 5 12 5C18.5 5 22 12 22 12C22 12 18.5 19 12 19C5.5 19 2 12 2 12Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/>
+        <rect x="10.6" y="8.5" width="2.8" height="7" rx="0.3" fill="currentColor"/>
+        <rect x="8.5" y="10.6" width="7" height="2.8" rx="0.3" fill="currentColor"/>
+      </svg>
+    </div>
+    <span class="header-title">MEDIC Console Bridge</span>
+    <div class="header-status">
+      <div class="header-dot" id="header-dot"></div>
+      <div class="header-tooltip" id="header-tooltip">Checking…</div>
+    </div>
+  </div>
+
+  <!-- Toggles -->
+  <div class="section">
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">Enable monitoring</div>
+        <div class="toggle-sublabel">Capture errors & warnings</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="toggle-enabled">
+        <div class="toggle-track"></div>
+        <div class="toggle-thumb"></div>
+      </label>
+    </div>
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">Auto-enable approved domains</div>
+        <div class="toggle-sublabel">Skip activation for known domains</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="toggle-auto-enable">
+        <div class="toggle-track"></div>
+        <div class="toggle-thumb"></div>
+      </label>
+    </div>
+  </div>
+
+  <!-- Approved domains list -->
+  <div class="section">
+    <div class="domain-input-row">
+      <input type="text" class="domain-input" id="domain-input" placeholder="localhost:8001" spellcheck="false">
+      <button class="btn-add" id="btn-add-domain" title="Add domain">＋</button>
+    </div>
+    <div class="domain-list collapsed" id="domain-list"></div>
+    <div class="expand-bar" id="expand-bar">
+      <span class="chevron">▾</span>
+    </div>
+  </div>
+
+  <!-- Reconnect -->
+  <div class="section" id="reconnect-section" style="display:none">
+    <button class="btn-reconnect" id="btn-reconnect">Reconnect to VS Code</button>
+  </div>
+
+  <div class="info">
+    Errors stream to <strong>ws://localhost:18988</strong>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

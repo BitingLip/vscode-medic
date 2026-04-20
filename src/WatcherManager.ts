@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
+import { WebSocketServer, WebSocket } from 'ws';
 import { WatcherConfig, ErrorEntry, DEFAULT_ERROR_PATTERNS, DEFAULT_WARNING_PATTERNS } from './types';
 import { ErrorQueue } from './ErrorQueue';
 
@@ -15,6 +16,12 @@ export class WatcherManager implements vscode.Disposable {
     private configs: WatcherConfig[] = [];
     private multiLineBuffer = new Map<string, { lines: string[]; timer: NodeJS.Timeout; error?: ErrorEntry }>();
     private readonly output = vscode.window.createOutputChannel('MEDIC');
+    private wsServer: WebSocketServer | undefined;
+    private wsClients = new Set<WebSocket>();
+    private readonly WS_PORT = 18988;
+    /** Recent web messages for dedup: key → timestamp */
+    private wsRecentMessages = new Map<string, number>();
+    private wsRecentCleanupTimer: ReturnType<typeof setInterval> | undefined;
 
     /** Strip ANSI escape sequences (color codes, cursor movement, etc.) */
     private static stripAnsi(str: string): string {
@@ -214,6 +221,11 @@ export class WatcherManager implements vscode.Disposable {
                     if (!stillRunning) {
                         toRemove.push(config.id);
                     }
+                }
+            } else if (config.type === 'web') {
+                // Remove web watchers when no browser extension is connected
+                if (this.wsClients.size === 0) {
+                    toRemove.push(config.id);
                 }
             }
         }
@@ -580,6 +592,15 @@ export class WatcherManager implements vscode.Disposable {
         }
         this.startTerminalListener();
         this.startPolling();
+        this.startWebSocketServer();
+
+        // Periodic cleanup of the WebSocket dedup cache (every 10s)
+        this.wsRecentCleanupTimer = setInterval(() => {
+            const cutoff = Date.now() - 5000;
+            for (const [key, ts] of this.wsRecentMessages) {
+                if (ts < cutoff) { this.wsRecentMessages.delete(key); }
+            }
+        }, 10_000);
     }
 
     private startWatcher(config: WatcherConfig): void {
@@ -893,10 +914,180 @@ export class WatcherManager implements vscode.Disposable {
         await this.context.globalState.update('watcherConfigs', this.configs);
     }
 
+    // ── WebSocket Server (Browser Console) ───────────────────────────
+
+    private startWebSocketServer(): void {
+        if (this.wsServer) { return; }
+
+        try {
+            this.wsServer = new WebSocketServer({ port: this.WS_PORT });
+            this.output.appendLine(`[WebSocket] Server listening on ws://localhost:${this.WS_PORT}`);
+
+            this.wsServer.on('connection', (ws, req) => {
+                this.output.appendLine(`[WebSocket] Client connected`);
+                this.wsClients.add(ws);
+
+                ws.send(JSON.stringify({ type: 'connected' }));
+
+                ws.on('message', (data) => {
+                    try {
+                        const msg = JSON.parse(data.toString());
+                        this.handleWebSocketMessage(msg);
+                    } catch (e) {
+                        this.output.appendLine(`[WebSocket] Bad message: ${e}`);
+                    }
+                });
+
+                ws.on('close', () => {
+                    this.wsClients.delete(ws);
+                    this.output.appendLine(`[WebSocket] Client disconnected`);
+                    this.cleanupWebWatchers();
+                });
+
+                ws.on('error', (err) => {
+                    this.output.appendLine(`[WebSocket] Client error: ${err.message}`);
+                    this.wsClients.delete(ws);
+                });
+            });
+
+            this.wsServer.on('error', (err) => {
+                this.output.appendLine(`[WebSocket] Server error: ${err.message}`);
+                if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+                    this.output.appendLine(`[WebSocket] Port ${this.WS_PORT} in use — Web Console disabled`);
+                }
+            });
+        } catch (err) {
+            this.output.appendLine(`[WebSocket] Failed to start: ${err}`);
+        }
+    }
+
+    /** Remove web watchers when no browser clients are connected */
+    private cleanupWebWatchers(): void {
+        if (this.wsClients.size > 0) { return; }
+        const webIds = this.configs.filter(c => c.type === 'web' && !c.manual && !c.archived).map(c => c.id);
+        if (webIds.length === 0) { return; }
+        for (const id of webIds) {
+            this.stopWatcher(id);
+        }
+        this.configs = this.configs.filter(c => c.type !== 'web' || c.manual || c.archived);
+        this.saveConfigs();
+        this._onDidChangeConfigs.fire();
+        this.output.appendLine(`[WebSocket] Cleaned up ${webIds.length} web watcher(s) — no clients connected`);
+    }
+
+    private ensureWebWatcher(tabId: number | string, tabTitle: string, tabUrl: string): string {
+        // Stable ID per browser tab
+        const id = `web://tab/${tabId}`;
+        const existing = this.configs.find(c => c.id === id);
+
+        // Derive a display name from title or URL
+        let name = tabTitle;
+        if (!name) {
+            try {
+                const url = new URL(tabUrl);
+                name = url.hostname + (url.port ? ':' + url.port : '') + url.pathname;
+            } catch {
+                name = tabUrl || `Tab ${tabId}`;
+            }
+        }
+        // Truncate long titles
+        if (name.length > 60) { name = name.substring(0, 57) + '…'; }
+
+        if (existing) {
+            // Update name if the tab title changed
+            if (existing.name !== name) {
+                existing.name = name;
+                existing.path = tabUrl;
+                this.saveConfigs();
+                this._onDidChangeConfigs.fire();
+            }
+            return existing.id;
+        }
+
+        const config: WatcherConfig = {
+            id,
+            name,
+            type: 'web',
+            path: tabUrl,
+            errorPatterns: [],   // Not used — browser sends structured data
+            warningPatterns: [], // Not used — browser sends structured data
+            enabled: true,
+        };
+
+        this.configs.push(config);
+        this.saveConfigs();
+        this._onDidChangeConfigs.fire();
+        this.output.appendLine(`[WebSocket] Created web watcher: ${name} (${id})`);
+        return id;
+    }
+
+    /**
+     * Handle a structured message from the browser extension.
+     * Expected shape:
+     * {
+     *   type: 'error' | 'warning',
+     *   message: string,
+     *   source?: string,     // file URL
+     *   lineno?: number,
+     *   colno?: number,
+     *   stack?: string,
+     *   url: string,          // page URL
+     *   tabId?: number,       // Chrome tab ID
+     *   tabTitle?: string,    // Chrome tab title
+     *   tabUrl?: string,      // Chrome tab URL
+     *   timestamp?: number
+     * }
+     */
+    private handleWebSocketMessage(msg: any): void {
+        if (!msg || !msg.type || !msg.message) { return; }
+
+        const tabId = msg.tabId ?? 0;
+
+        // ── Dedup: drop identical messages within a 2-second window ──
+        const dedupKey = `${tabId}|${msg.type}|${msg.message}`;
+        const now = Date.now();
+        const lastSeen = this.wsRecentMessages.get(dedupKey);
+        if (lastSeen && now - lastSeen < 2000) {
+            return; // Silently drop rapid duplicate
+        }
+        this.wsRecentMessages.set(dedupKey, now);
+
+        // Ensure a per-tab watcher exists
+        const watcherId = this.ensureWebWatcher(tabId, msg.tabTitle ?? '', msg.tabUrl ?? msg.url ?? '');
+
+        const severity: 'error' | 'warning' = msg.type === 'warning' ? 'warning' : 'error';
+
+        // Build a raw line for deduplication
+        const raw = msg.stack
+            ? `${msg.message}\n${msg.stack}`
+            : msg.message;
+
+        const entry: ErrorEntry = {
+            id: '',          // assigned by ErrorQueue
+            timestamp: msg.timestamp ?? now,
+            source: msg.url ?? msg.tabUrl ?? '',
+            watcherId,
+            message: msg.message,
+            file: msg.source,
+            line: msg.lineno,
+            stackTrace: msg.stack,
+            raw,
+            severity,
+            status: 'pending',
+        };
+
+        this.errorQueue.push(entry);
+        this.output.appendLine(`[WebSocket] ${severity}: ${msg.message.substring(0, 120)}`);
+    }
+
     dispose(): void {
         if (this.pollTimer) {
             clearInterval(this.pollTimer);
             this.pollTimer = undefined;
+        }
+        if (this.wsRecentCleanupTimer) {
+            clearInterval(this.wsRecentCleanupTimer);
+            this.wsRecentCleanupTimer = undefined;
         }
         for (const watcher of this.fileWatchers.values()) {
             watcher.dispose();
@@ -904,6 +1095,16 @@ export class WatcherManager implements vscode.Disposable {
         this.fileWatchers.clear();
         this.resolvedPaths.clear();
         this.terminalDisposable?.dispose();
+
+        // WebSocket server
+        for (const client of this.wsClients) {
+            try { client.close(); } catch { /* ignore */ }
+        }
+        this.wsClients.clear();
+        if (this.wsServer) {
+            this.wsServer.close();
+            this.wsServer = undefined;
+        }
 
         for (const buf of this.multiLineBuffer.values()) {
             clearTimeout(buf.timer);

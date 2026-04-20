@@ -958,7 +958,7 @@
             if (sectionWatchers.length === 0) {
                 const emptyEl = document.createElement('div');
                 emptyEl.className = 'watcher-section-empty';
-                emptyEl.textContent = sectionName === 'Web Console' ? 'Chrome plugin — coming soon' : 'No watchers';
+                emptyEl.textContent = sectionName === 'Web Console' ? 'No browsers connected' : 'No watchers';
                 listEl?.appendChild(emptyEl);
             } else if (sectionName === 'Processes') {
                 // Groups already computed above for the count

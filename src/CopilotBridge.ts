@@ -186,7 +186,7 @@ export class CopilotBridge implements vscode.Disposable {
                 isPartialQuery: false,
             };
             if (mode) { opts.mode = mode; }
-            if (model) { opts.modelSelector = { id: model }; }
+            if (model) { opts.model = model; }
 
             await vscode.commands.executeCommand('workbench.action.chat.open', opts);
         } catch {
