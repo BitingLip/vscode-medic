@@ -25,6 +25,7 @@
     let collapsedSections = new Set();
     /** @type {Set<string>} */
     let pinnedWatcherIds = new Set();
+    let browserClients = 0;
     // Severity filter state (global = watcher sidebar, local = error feed header)
     let globalFilterErrors = true;
     let globalFilterWarnings = true;
@@ -241,10 +242,24 @@
         $feedCountWarnings.classList.toggle('inactive', !localFilterWarnings);
         $feedCountErrors.classList.toggle('inactive', !localFilterErrors);
 
-        // Show/hide feed-level trash icon
-        const filtered = getFilteredErrors();
+        // Dim feed-level trash icon when nothing would be deleted; update tooltip
         if ($feedTitleDelete) {
-            $feedTitleDelete.style.display = filtered.length ? '' : 'none';
+            const hasDeletable = errors.some(e => {
+                const sev = e.severity || 'error';
+                if (sev === 'error') return localFilterErrors;
+                if (sev === 'warning') return localFilterWarnings;
+                return false;
+            });
+            $feedTitleDelete.classList.toggle('empty', !hasDeletable);
+            if (!localFilterErrors && !localFilterWarnings) {
+                $feedTitleDelete.title = 'Nothing to clear';
+            } else if (localFilterErrors && !localFilterWarnings) {
+                $feedTitleDelete.title = 'Clear all errors';
+            } else if (!localFilterErrors && localFilterWarnings) {
+                $feedTitleDelete.title = 'Clear all warnings';
+            } else {
+                $feedTitleDelete.title = 'Clear all errors and warnings';
+            }
         }
     }
 
@@ -544,12 +559,18 @@
     /** Update an existing error card in-place */
     function updateErrorCard(card, err) {
         const isChip = selectedErrorIds.has(err.id);
-        card.className = `error-item-container ${err.status}${isChip ? ' chip-selected' : ''}`;
+        const sevClass = err.severity === 'error' ? 'severity-error' : 'severity-warning';
+        card.className = `error-item-container ${err.status} ${sevClass}${isChip ? ' chip-selected' : ''}`;
+
+        // Update the select checkbox checked state
+        const checkBtn = card.querySelector('.error-select-check');
+        if (checkBtn) {
+            checkBtn.classList.toggle('checked', isChip);
+        }
 
         // Update the .error-code-type sidebar (always severity icon, never status)
         const typeEl = card.querySelector('.error-code-type');
         if (typeEl) {
-            const sevClass = err.severity === 'error' ? 'severity-error' : 'severity-warning';
             typeEl.className = `error-code-type ${sevClass}`;
             const typeIconSpan = typeEl.querySelector('.codicon');
             if (typeIconSpan) {
@@ -673,9 +694,14 @@
 
     /** Delete all currently visible (filtered) errors */
     function deleteVisibleErrors() {
-        const filtered = getFilteredErrors();
-        if (filtered.length === 0) return;
-        filtered.forEach(err => {
+        const toDelete = errors.filter(err => {
+            const sev = err.severity || 'error';
+            if (sev === 'error') return localFilterErrors;
+            if (sev === 'warning') return localFilterWarnings;
+            return false;
+        });
+        if (toDelete.length === 0) return;
+        toDelete.forEach(err => {
             vscode.postMessage({ type: 'dismissError', errorId: err.id });
         });
     }
@@ -687,7 +713,6 @@
     function createErrorItem(err) {
         const el = document.createElement('div');
         const isChipSelected = selectedErrorIds.has(err.id);
-        el.className = `error-item-container ${err.status}${isChipSelected ? ' chip-selected' : ''}`;
         el.dataset.id = err.id;
 
         const severityClass = err.severity === 'error' ? 'severity-error' : 'severity-warning';
@@ -697,6 +722,8 @@
         const checkboxChecked = isChipSelected ? ' checked' : '';
         const hasOverflow = err.message.split('\n').length > 6;
         const count = err.occurrences || 1;
+
+        el.className = `error-item-container ${err.status} ${severityClass}${isChipSelected ? ' chip-selected' : ''}`;
 
         el.innerHTML = `
             <div class="error-header">
@@ -956,10 +983,30 @@
             const listEl = sectionEl.querySelector('.watcher-section-list');
 
             if (sectionWatchers.length === 0) {
-                const emptyEl = document.createElement('div');
-                emptyEl.className = 'watcher-section-empty';
-                emptyEl.textContent = sectionName === 'Web Console' ? 'No browsers connected' : 'No watchers';
-                listEl?.appendChild(emptyEl);
+                if (sectionName === 'Web Console' && browserClients === 0) {
+                    const ctaEl = document.createElement('div');
+                    ctaEl.className = 'watcher-section-install-cta';
+                    ctaEl.innerHTML = `
+                        <button class="btn-install-chrome" type="button">
+                            <span class="codicon codicon-cloud-download"></span>
+                            Install Chrome extension
+                        </button>`;
+                    const btn = ctaEl.querySelector('.btn-install-chrome');
+                    btn?.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        vscode.postMessage({ type: 'installChromeExtension' });
+                    });
+                    listEl?.appendChild(ctaEl);
+                } else {
+                    const emptyEl = document.createElement('div');
+                    emptyEl.className = 'watcher-section-empty';
+                    if (sectionName === 'Web Console') {
+                        emptyEl.textContent = 'Connected — waiting for errors';
+                    } else {
+                        emptyEl.textContent = 'No watchers';
+                    }
+                    listEl?.appendChild(emptyEl);
+                }
             } else if (sectionName === 'Processes') {
                 // Groups already computed above for the count
                 for (const g of pGroups) {
@@ -1350,6 +1397,7 @@
         } else {
             $viewpane.classList.remove('single-column');
         }
+        syncSidebarToggle();
     }
 
     // Sash drag resize
@@ -1732,7 +1780,9 @@
 
     function syncSidebarToggle() {
         if ($feedTitleShowSidebar) {
-            $feedTitleShowSidebar.style.display = sidebarHidden ? '' : 'none';
+            const singleCol = $viewpane.classList.contains('single-column');
+            const hidden = sidebarHidden || singleCol;
+            $feedTitleShowSidebar.style.display = hidden ? '' : 'none';
         }
     }
 
@@ -2115,6 +2165,7 @@
                 if (data.pinnedWatcherIds) {
                     pinnedWatcherIds = new Set(data.pinnedWatcherIds);
                 }
+                browserClients = data.browserClients || 0;
                 render();
                 break;
             }
@@ -2131,6 +2182,12 @@
             case 'toggleSidebar': {
                 sidebarHidden = !sidebarHidden;
                 $sidebar.classList.toggle('hidden', sidebarHidden);
+                syncSidebarToggle();
+                break;
+            }
+            case 'showSidebar': {
+                sidebarHidden = false;
+                $sidebar.classList.remove('hidden');
                 syncSidebarToggle();
                 break;
             }

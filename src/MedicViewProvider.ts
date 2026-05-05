@@ -33,6 +33,10 @@ export class medicViewProvider implements vscode.WebviewViewProvider {
         this.view?.webview.postMessage({ type: 'showAddWatcher' });
     }
 
+    public showSidebar(): void {
+        this.view?.webview.postMessage({ type: 'showSidebar' });
+    }
+
     public getPinnedIds(): Set<string> {
         return new Set(this.pinnedWatcherIds);
     }
@@ -73,6 +77,7 @@ export class medicViewProvider implements vscode.WebviewViewProvider {
             watchers: this.watcherManager.getConfigs(),
             selectedWatcherId: this.selectedWatcherId,
             pinnedWatcherIds: this.pinnedWatcherIds,
+            browserClients: this.watcherManager.getBrowserClientCount(),
             agent: config.get<string>('agent', ''),
             autoTrigger: config.get<boolean>('autoTrigger', false),
             debounceMs: config.get<number>('debounceMs', 3000),
@@ -175,6 +180,13 @@ export class medicViewProvider implements vscode.WebviewViewProvider {
             case 'openSettings':
                 await vscode.commands.executeCommand('workbench.action.openSettings', 'medic');
                 break;
+
+            case 'installChromeExtension': {
+                const folderPath = vscode.Uri.joinPath(this.extensionUri, 'chrome-extension').fsPath;
+                // Open Copilot Chat with the install guide; the user loads the folder via chrome://extensions/.
+                await this.copilotBridge.openInstallGuide(folderPath);
+                break;
+            }
 
             case 'openFile': {
                 let filePath = msg.file;
@@ -347,7 +359,7 @@ export class medicViewProvider implements vscode.WebviewViewProvider {
                     </button>
                 </span>
                 <div class="error-feed-title-actions">
-                    <button class="icon-btn" id="feed-title-delete" title="Clear all visible errors" style="display:none;">
+                    <button class="icon-btn" id="feed-title-delete" title="Clear all errors and warnings">
                         <span class="codicon codicon-trash"></span>
                     </button>
 

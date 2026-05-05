@@ -11,6 +11,24 @@
 const WS_URL = 'ws://localhost:18988';
 const RECONNECT_DELAY_MS = 3000;
 const MAX_QUEUE = 200;
+const KEEPALIVE_ALARM = 'medic-keepalive';
+
+// ── Service-worker keepalive ────────────────────────────────────────
+// MV3 service workers shut down after ~30s idle, killing our WebSocket
+// and reconnect timer. A periodic alarm keeps the worker resident and
+// gives us a hook to verify/restore the connection.
+try {
+  chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 }); // ~24s
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== KEEPALIVE_ALARM) return;
+    if (!enabled) return;
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      connect();
+    }
+  });
+} catch {
+  // chrome.alarms may not be available in some test contexts
+}
 
 /** @type {WebSocket | null} */
 let ws = null;
@@ -39,7 +57,7 @@ function extractDomain(url) {
 
 function isDomainApproved(tabUrl) {
   if (!autoEnableApproved) return true; // no filtering
-  if (approvedDomains.length === 0) return true; // no domains = allow all
+  if (approvedDomains.length === 0) return false; // no domains configured = block all
   const host = extractDomain(tabUrl);
   if (!host) return false;
   return approvedDomains.some(pattern => {
@@ -82,6 +100,8 @@ function connect() {
       ws.send(JSON.stringify(msg));
     }
     queue = [];
+    // Report currently active approved tabs so VS Code can prune stale watchers
+    sendActiveTabs();
   };
 
   ws.onclose = () => {
@@ -100,6 +120,8 @@ function connect() {
       const data = JSON.parse(event.data);
       if (data.type === 'connected') {
         console.log('[MEDIC] Connected to VS Code, watcher:', data.watcherId);
+      } else if (data.type === 'getActiveTabs') {
+        sendActiveTabs();
       }
     } catch {
       // Ignore invalid messages
@@ -148,6 +170,18 @@ function relay(msg) {
   }
 }
 
+// ── Active Tab Report ───────────────────────────────────────────────
+
+function sendActiveTabs() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  chrome.tabs.query({}, (tabs) => {
+    const activeTabs = tabs
+      .filter(t => t.id != null && t.url && isDomainApproved(t.url))
+      .map(t => ({ tabId: t.id, tabTitle: t.title || '', tabUrl: t.url || '' }));
+    ws.send(JSON.stringify({ type: 'activeTabs', tabs: activeTabs }));
+  });
+}
+
 // ── Chrome Runtime Messaging ─────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -193,6 +227,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
       case 'domainsUpdated':
         approvedDomains = message.approvedDomains || [];
+        sendActiveTabs();
         return false;
       case 'setAutoEnable':
         autoEnableApproved = message.autoEnableApproved !== false;

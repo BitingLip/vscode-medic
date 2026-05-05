@@ -31,6 +31,21 @@ export class CopilotBridge implements vscode.Disposable {
         }
     }
 
+    /** Open Copilot Chat in agent mode with a guided prompt for installing the bundled Chrome extension */
+    async openInstallGuide(folderPath: string): Promise<void> {
+        const prompt =
+            `Help me install the MEDIC Chrome extension so the VS Code panel can receive browser console errors.\n\n` +
+            `The unpacked extension folder is located at:\n\`${folderPath}\`\n\n` +
+            `Walk me through these steps and confirm each one:\n` +
+            `1. Open Chrome and navigate to \`chrome://extensions/\`.\n` +
+            `2. Toggle **Developer mode** on (top-right corner).\n` +
+            `3. Click **Load unpacked** and select the folder above.\n` +
+            `4. Confirm the "MEDIC" extension appears and is enabled.\n` +
+            `5. Open any web page (or reload an existing tab) — the extension auto-connects to the MEDIC WebSocket on \`localhost\`.\n\n` +
+            `Once connected, the "Web Console" section in the MEDIC sidebar will switch from "No browsers connected" to "Connected — waiting for errors". Let me know when each step is done, and troubleshoot if anything fails.`;
+        await this.openChat(prompt, 'agent', undefined, true);
+    }
+
     /** Send specific selected errors to Copilot Chat */
     async sendErrors(errors: ErrorEntry[], guidingPrompt?: string, mode?: string, model?: string, newSession: boolean = true): Promise<void> {
         if (errors.length === 1) {

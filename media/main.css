@@ -187,9 +187,7 @@ html, body {
 .feed-count-slash {
     display: none;
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    inset: 0;
     pointer-events: none;
 }
 
@@ -227,6 +225,11 @@ html, body {
 
 .error-feed-title-actions .icon-btn .codicon {
     color: #cccccc;
+}
+
+#feed-title-delete.empty {
+    opacity: 0.3;
+    pointer-events: none;
 }
 
 #feed-title-show-sidebar {
@@ -387,6 +390,48 @@ html, body {
     font-size: 11px;
     color: #6d6d6d;
     font-style: italic;
+}
+
+.watcher-section-install-cta {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px 10px;
+}
+
+.watcher-section-install-cta .install-cta-text {
+    font-size: 11px;
+    color: #9d9d9d;
+    line-height: 1.4;
+}
+
+.btn-install-chrome {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border: none;
+    border-radius: 4px;
+    background: var(--medic-color-active);
+    color: #1f1f1f;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s, opacity 0.15s;
+}
+
+.btn-install-chrome:hover {
+    filter: brightness(1.1);
+}
+
+.btn-install-chrome:active {
+    filter: brightness(0.95);
+}
+
+.btn-install-chrome .codicon {
+    font-size: 14px;
 }
 
 .watcher-section-list { overflow: hidden; }
@@ -668,29 +713,32 @@ html, body {
     font-size: 11px;
     font-weight: 600;
     color: #cccccc;
-    transition: opacity 0.15s;
+    transition: opacity 0.15s, filter 0.15s;
     position: relative;
 }
 
 .filter-toggle:hover {
-    background: rgba(255,255,255,0.06);
+    background: transparent;
 }
 
 .filter-toggle.active .filter-toggle-icon .codicon {
     color: #cccccc;
 }
 
+/* Inactive = dark grey, no severity color */
+.filter-toggle.inactive .filter-toggle-icon .codicon {
+    color: #6d6d6d !important;
+}
+
 .filter-toggle.inactive {
-    opacity: 0.35;
+    opacity: 1;
 }
 
 /* Slash overlay — hidden when active, shown when inactive */
 .filter-toggle-slash {
     display: none;
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    inset: 0;
     pointer-events: none;
 }
 
@@ -725,14 +773,14 @@ html, body {
 .slash-front {
     font-size: 16px;
     position: absolute;
-    transform: rotate(-45deg);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-45deg);
 }
 
 .slash-shadow {
     color: #181818;
     /* offset to create outline/shade effect */
-    top: 0px;
-    left: 0px;
     text-shadow:
         1px 0 0 #181818,
         -1px 0 0 #181818,
@@ -742,8 +790,6 @@ html, body {
 
 .slash-front {
     color: #cccccc;
-    top: 0px;
-    left: 0px;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1042,6 +1088,10 @@ html, body {
 .error-feed-section-list {
     overflow: hidden;
 }
+.error-feed-section-list > :first-child {
+    border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border, rgba(255, 255, 255, 0.06)));
+}
+
 
 .error-feed-section.collapsed .error-feed-section-list {
     display: none;
@@ -1064,7 +1114,7 @@ html, body {
 /* ── Error items ──────────────────────────────────────────────── */
 
 .error-item-container {
-    padding: 12px 16px;
+    padding: 12px 12px;
     border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border, rgba(255,255,255,0.06)));
     transition: background 0.1s;
 }
@@ -1088,7 +1138,6 @@ html, body {
 
 .error-item-container.chip-selected {
     background: rgba(0, 122, 204, 0.08);
-    box-shadow: inset 2px 0 0 var(--vscode-focusBorder, #4daafc);
 }
 
 /* ── Error Select Checkbox ─────────────────────────────────────── */
@@ -1118,6 +1167,19 @@ html, body {
     background: var(--vscode-button-background, #0e639c);
     border-color: var(--vscode-button-background, #0e639c);
     color: var(--vscode-button-foreground, #fff);
+}
+
+/* Severity-matched fill when selected */
+.error-item-container.severity-error .error-select-check.checked {
+    background: var(--medic-color-active);
+    border-color: var(--medic-color-active);
+    color: #1f1f1f;
+}
+
+.error-item-container.severity-warning .error-select-check.checked {
+    background: var(--medic-color-active);
+    border-color: var(--medic-color-active);
+    color: #1f1f1f;
 }
 
 .error-select-check .codicon {
@@ -1294,7 +1356,7 @@ html, body {
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 12px;
     line-height: 1.5;
-    padding: 8px 12px;
+    padding: 8px 8px;
     white-space: pre-wrap;
     word-break: break-word;
     overflow: hidden;

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "MEDIC – Browser Console Bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Routes browser console errors and warnings to MEDIC in VS Code via WebSocket.",
-  "permissions": ["activeTab", "tabs", "storage", "scripting"],
+  "permissions": ["activeTab", "tabs", "storage", "scripting", "alarms"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

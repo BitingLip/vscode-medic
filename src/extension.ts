@@ -14,10 +14,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     copilotBridge = new CopilotBridge(errorQueue);
     copilotBridge.setupAutoTrigger();
 
-    // Auto-discover watchers on first run (or if all were removed)
-    if (watcherManager.getConfigs().length === 0) {
-        await watcherManager.discoverAll();
-    }
+    // Always run discovery on activation to prune stale auto-discovered
+    // watchers (for example old web tabs) and refresh process/terminal state.
+    await watcherManager.discoverAll();
 
     const viewProvider = new medicViewProvider(context.extensionUri, errorQueue, watcherManager, copilotBridge);
     context.subscriptions.push(
@@ -95,6 +94,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(
         vscode.commands.registerCommand('medic.openSettings', () => {
             vscode.commands.executeCommand('workbench.action.openSettings', 'medic');
+        }),
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('medic.showSidebar', async () => {
+            await vscode.commands.executeCommand('medic.view.focus');
+            viewProvider.showSidebar();
         }),
     );
 

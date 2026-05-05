@@ -2,6 +2,19 @@
 
 All notable changes to the **MEDIC** extension will be documented in this file.
 
+## [1.1.5] — 2026-05-05
+
+### Changed
+- **Smaller VSIX** — Excluded stale `media/*.bak` backup files from the package (~85 KB smaller).
+
+## [1.1.4] — 2026-05-05
+
+### Added
+- **Web Console install CTA** — When no browser clients are connected, the Web Console section now shows a one-click button that opens Copilot Chat with a step-by-step guide for loading the bundled Chrome extension via `chrome://extensions/`.
+
+### Changed
+- **Trash button is filter-aware** — Clearing the feed now respects the active error/warning filters, with a dynamic tooltip and a dimmed state when there is nothing to clear.
+
 ## [1.1.0] — 2026-04-14
 
 ### Added

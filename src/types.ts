@@ -50,6 +50,8 @@ export interface PanelState {
     watchers: WatcherConfig[];
     selectedWatcherId: string | null;
     pinnedWatcherIds?: string[];
+    /** Number of currently connected browser extension WebSocket clients */
+    browserClients?: number;
     agent: string;
     autoTrigger: boolean;
     debounceMs: number;

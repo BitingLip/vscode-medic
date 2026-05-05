@@ -113,6 +113,11 @@ export class WatcherManager implements vscode.Disposable {
         return [...this.configs];
     }
 
+    /** Number of currently connected browser extension WebSocket clients. */
+    getBrowserClientCount(): number {
+        return this.wsClients.size;
+    }
+
     /**
      * Discovery-only refresh. Does NOT read file content or scan for errors.
      * - Scans common log directories (logs/, log/, root) for *.log files.
@@ -206,8 +211,11 @@ export class WatcherManager implements vscode.Disposable {
         // 5. Clean up stale auto-discovered watchers
         const toRemove: string[] = [];
         for (const config of this.configs) {
-            // Never auto-remove manual, archived, or pinned watchers
-            if (config.manual || config.archived || protectedIds?.has(config.id)) { continue; }
+            // Never auto-remove manual/archived watchers. Pinned protection
+            // applies to non-web watchers only; stale web tab watchers should
+            // always be eligible for cleanup.
+            if (config.manual || config.archived) { continue; }
+            if (config.type !== 'web' && protectedIds?.has(config.id)) { continue; }
 
             if (config.type === 'file') {
                 const resolved = this.resolvedPaths.get(config.id) ?? this.resolvePath(config.path);
@@ -239,6 +247,15 @@ export class WatcherManager implements vscode.Disposable {
         if (added > 0 || removed > 0 || processUpdated > 0) {
             await this.saveConfigs();
             this._onDidChangeConfigs.fire();
+        }
+
+        // If browser clients are connected, ask them to report active tabs so
+        // stale web watchers are pruned asynchronously via handleWebSocketMessage
+        if (this.wsClients.size > 0) {
+            const req = JSON.stringify({ type: 'getActiveTabs' });
+            for (const client of this.wsClients) {
+                try { client.send(req); } catch { /* ignore */ }
+            }
         }
 
         return { added, removed };
@@ -926,6 +943,7 @@ export class WatcherManager implements vscode.Disposable {
             this.wsServer.on('connection', (ws, req) => {
                 this.output.appendLine(`[WebSocket] Client connected`);
                 this.wsClients.add(ws);
+                this._onDidChangeConfigs.fire();
 
                 ws.send(JSON.stringify({ type: 'connected' }));
 
@@ -942,6 +960,7 @@ export class WatcherManager implements vscode.Disposable {
                     this.wsClients.delete(ws);
                     this.output.appendLine(`[WebSocket] Client disconnected`);
                     this.cleanupWebWatchers();
+                    this._onDidChangeConfigs.fire();
                 });
 
                 ws.on('error', (err) => {
@@ -1039,7 +1058,39 @@ export class WatcherManager implements vscode.Disposable {
      * }
      */
     private handleWebSocketMessage(msg: any): void {
-        if (!msg || !msg.type || !msg.message) { return; }
+        if (!msg || !msg.type) { return; }
+
+        // ── Active tab report: prune watchers for tabs no longer open/approved ──
+        if (msg.type === 'activeTabs' && Array.isArray(msg.tabs)) {
+            const activeIds = new Set<string>(msg.tabs.map((t: any) => `web://tab/${t.tabId}`));
+            const toRemove = this.configs
+                .filter(c => c.type === 'web' && !c.manual && !c.archived && !activeIds.has(c.id))
+                .map(c => c.id);
+            if (toRemove.length > 0) {
+                for (const id of toRemove) { this.stopWatcher(id); }
+                this.configs = this.configs.filter(c => !toRemove.includes(c.id));
+                this.saveConfigs();
+                this._onDidChangeConfigs.fire();
+                this.output.appendLine(`[WebSocket] Pruned ${toRemove.length} stale web watcher(s)`);
+            }
+            // Also surface approved tabs immediately so users see what's connected,
+            // even before any error has been emitted from the page.
+            let added = 0;
+            for (const t of msg.tabs) {
+                if (t == null || t.tabId === undefined) { continue; }
+                const id = `web://tab/${t.tabId}`;
+                if (!this.configs.find(c => c.id === id)) {
+                    this.ensureWebWatcher(t.tabId, t.tabTitle ?? '', t.tabUrl ?? '');
+                    added++;
+                }
+            }
+            if (added > 0) {
+                this.output.appendLine(`[WebSocket] Registered ${added} active tab watcher(s)`);
+            }
+            return;
+        }
+
+        if (!msg.message) { return; }
 
         const tabId = msg.tabId ?? 0;
 

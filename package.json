@@ -2,7 +2,7 @@
     "name": "vscode-medic",
     "displayName": "MEDIC",
     "description": "Watches for runtime errors and automatically resolves them with Copilot.",
-    "version": "1.1.0",
+    "version": "1.1.5",
     "publisher": "bitinglip",
     "license": "MIT",
     "icon": "resources/icon.png",
@@ -118,6 +118,12 @@
                 "icon": "$(settings-gear)"
             },
             {
+                "command": "medic.showSidebar",
+                "title": "Show Watchers Sidebar",
+                "category": "MEDIC",
+                "icon": "$(layout-sidebar-right)"
+            },
+            {
                 "command": "medic.resolveError",
                 "title": "Mark Error as Fixed",
                 "category": "MEDIC",
@@ -149,6 +155,11 @@
         ],
         "menus": {
             "view/title": [
+                {
+                    "command": "medic.showSidebar",
+                    "when": "view == medic.view",
+                    "group": "navigation@0"
+                },
                 {
                     "command": "medic.addWatcher",
                     "when": "view == medic.view",
